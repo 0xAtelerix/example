@@ -10,3 +10,5 @@ deps:
 tidy:
 	GOPRIVATE=github.com/0xAtelerix/* go mod tidy
 
+env:
+	go env -w GOPRIVATE=github.com/0xAtelerix/sdk

@@ -1,9 +1,9 @@
 module github.com/0xAtelerix/example
 
-go 1.24.0
+go 1.24.1
 
 require (
-	github.com/0xAtelerix/sdk/gosdk v0.0.0-20250320092548-f36930858b98
+	github.com/0xAtelerix/sdk/gosdk v0.0.0-20250325102315-c3765f6e4742
 	github.com/ledgerwatch/erigon-lib v1.0.0
 )
 
