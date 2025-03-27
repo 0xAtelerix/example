@@ -23,6 +23,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	log.Println("Start appchain")
 	appchainExample, err := gosdk.NewAppchain(
 		stateTransition,
 		rootCalculator,
@@ -30,7 +31,7 @@ func main() {
 		txPool,
 		config)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to start appchain ", err)
 	}
 
 	go func() {
@@ -38,13 +39,13 @@ func main() {
 
 		// Запуск сервера
 		log.Println("JSON-RPC сервер запущен на :8080")
-		log.Fatal(http.ListenAndServe(":8080", nil))
+		log.Println(http.ListenAndServe(":8080", nil))
 	}()
 
 	//init your tmp db if you need it. It won't be a part of consensus
 	//here you could write your own api, using db from appchainExample.AppchainDB
 	err = appchainExample.Run(context.TODO())
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to run the appchain", err)
 	}
 }
