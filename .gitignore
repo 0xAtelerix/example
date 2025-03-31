@@ -2,3 +2,5 @@
 go.sum
 test
 test_tmp
+test_consenus
+test_consenus_app

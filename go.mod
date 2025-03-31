@@ -3,7 +3,7 @@ module github.com/0xAtelerix/example
 go 1.24.1
 
 require (
-	github.com/0xAtelerix/sdk/gosdk v0.0.0-20250327104745-c0c7a920bfae
+	github.com/0xAtelerix/sdk/gosdk v0.0.0-20250328121506-0c8e11df308f
 	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/rs/zerolog v1.34.0
 

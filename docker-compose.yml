@@ -1,0 +1,28 @@
+services:
+  appchain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./test_consenus:/test_consenus:ro   # 👈 Только чтение
+      - ./test_consenus_app:/test_consenus_app  # 👈 По умолчанию read-write
+    ports:
+      - "50051:50051"
+      - "8080:8080"
+    depends_on:
+      - consensusnode
+    command:
+      - --chain-id=1
+      - --emitter-port=:50051
+      - --db-path=/test_consenus_app/db
+      - --tmp-db-path=/test_consenus_app/tmpdb
+      - --stream-dir=/test_consenus/snapshot.data
+      - --rpc-port=:8080
+
+  consensusnode:
+    image: b00ris/consensusnode:latest
+    volumes:
+      - ./test_consenus:/test_consenus  # 👈 По умолчанию read-write
+    command:
+      - --snapshot-dir=/test_consenus
+      - --appchain=1=appchain:50051
