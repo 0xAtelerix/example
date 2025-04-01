@@ -26,7 +26,7 @@ clean:
 dockerrun:
 	docker run --rm \
 	  -v $(PWD)/test_consenus:/test_consenus \
-	  abs/consensusdevnode:latest \
+	  b00ris/consensusnode:latest \
 	  --snapshot-dir=/test_consenus \
 	  --appchain=1=host.docker.internal:50051
 
