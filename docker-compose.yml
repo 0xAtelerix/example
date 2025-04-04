@@ -12,10 +12,9 @@ services:
     depends_on:
       - consensusnode
     command:
-      - --chain-id=1
       - --emitter-port=:50051
       - --db-path=/test_consenus_app/db
-      - --tmp-db-path=/test_consenus_app/tmpdb
+      - --local-db-path=/test_consenus_app/tmpdb
       - --stream-dir=/test_consenus/snapshot.data
       - --rpc-port=:8080
 

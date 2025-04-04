@@ -4,7 +4,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/0xAtelerix/sdk/gosdk"
-	emitterproto "github.com/0xAtelerix/sdk/gosdk/proto"
 	"github.com/0xAtelerix/sdk/gosdk/types"
 )
 
@@ -83,15 +82,4 @@ func NewRootCalculatorExample() *ExampleRootCalculator {
 }
 func (r *ExampleRootCalculator) StateRootCalculator(tx kv.RwTx) ([32]byte, error) {
 	return [32]byte{}, nil
-}
-
-// step 5:
-// How to communicate with validator
-// not sure that it is an appchain part.
-type EmitterServer struct {
-	emitterproto.UnimplementedEmitterServer
-}
-
-type HealthServer struct {
-	emitterproto.UnimplementedHealthServer
 }

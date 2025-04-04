@@ -6,7 +6,9 @@ import (
 	"github.com/0xAtelerix/example"
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
-
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	mdbxlog "github.com/ledgerwatch/log/v3"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"net/http"
@@ -15,16 +17,19 @@ import (
 	"syscall"
 )
 
+const ChainID = 42
+
 func main() {
 	// CLI flags
+
+	config := gosdk.MakeAppchainConfig(ChainID)
 	var (
-		chainID        = flag.Uint64("chain-id", 42, "Chain ID of the appchain")
-		emitterPort    = flag.String("emitter-port", ":50051", "Emitter gRPC port")
-		appchainDBPath = flag.String("db-path", "./appchaindb", "Path to appchain DB")
-		//todo rename to not a part of consensus
-		tmpDBPath          = flag.String("tmp-db-path", "./tmpdb", "Path to temporary DB")
-		streamDir          = flag.String("stream-dir", "", "Event stream directory")
-		txDir              = flag.String("tx-dir", "", "Transaction stream directory")
+		emitterPort    = flag.String("emitter-port", config.EmitterPort, "Emitter gRPC port")
+		appchainDBPath = flag.String("db-path", config.AppchainDBPath, "Path to appchain DB")
+		streamDir      = flag.String("stream-dir", config.EventStreamDir, "Event stream directory")
+		txDir          = flag.String("tx-dir", config.TxStreamDir, "Transaction stream directory")
+
+		localDBPath        = flag.String("local-db-path", "./localdb", "Path to local DB")
 		ethereumBlocksPath = flag.String("ethdb", "", "read only eth blocks db")
 		solBlocksPath      = flag.String("soldb", "", "read only sol blocks db")
 		rpcPort            = flag.String("rpc-port", ":8080", "Port for the JSON-RPC server")
@@ -35,27 +40,29 @@ func main() {
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	config := gosdk.MakeAppchainConfig(*chainID)
 	config.EmitterPort = *emitterPort
 	config.AppchainDBPath = *appchainDBPath
-	config.TmpDBPath = *tmpDBPath
 	config.EventStreamDir = *streamDir
 	config.TxStreamDir = *txDir
 
 	stateTransition := gosdk.BatchProcesser[*example.ExampleTransaction]{
 		example.NewStateTransitionExample[*example.ExampleTransaction](),
 	}
-	rootCalculator := example.NewRootCalculatorExample()
 
-	txPool, err := txpool.NewTxPool[*example.ExampleTransaction](config.TmpDBPath)
+	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(*localDBPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return txpool.TxPoolTables
+		}).
+		Open()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize transaction pool")
+		log.Fatal().Err(err).Msg("Failed to local mdbx database")
 	}
+	txPool := txpool.NewTxPool[*example.ExampleTransaction](localDB)
 
 	log.Info().Msg("Starting appchain...")
 	appchainExample, err := gosdk.NewAppchain(
 		stateTransition,
-		rootCalculator,
 		example.AppchainExampleBlockConstructor,
 		txPool,
 		config)

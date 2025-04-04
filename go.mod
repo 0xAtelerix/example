@@ -3,10 +3,10 @@ module github.com/0xAtelerix/example
 go 1.24.1
 
 require (
-	github.com/0xAtelerix/sdk/gosdk v0.0.0-20250404064845-14ddd4de8341
+	github.com/0xAtelerix/sdk/gosdk v0.0.0-20250404202753-ddb7a8a9bd41
 	github.com/ledgerwatch/erigon-lib v1.0.0
+	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/rs/zerolog v1.34.0
-
 )
 
 require (
@@ -17,7 +17,6 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
-	github.com/ledgerwatch/log/v3 v3.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
