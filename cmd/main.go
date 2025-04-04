@@ -20,11 +20,17 @@ func main() {
 	var (
 		chainID        = flag.Uint64("chain-id", 42, "Chain ID of the appchain")
 		emitterPort    = flag.String("emitter-port", ":50051", "Emitter gRPC port")
-		appchainDBPath = flag.String("db-path", "./test", "Path to appchain DB")
-		tmpDBPath      = flag.String("tmp-db-path", "./test_tmp", "Path to temporary DB")
-		streamDir      = flag.String("stream-dir", "", "Event stream directory")
-		rpcPort        = flag.String("rpc-port", ":8080", "Port for the JSON-RPC server")
+		appchainDBPath = flag.String("db-path", "./appchaindb", "Path to appchain DB")
+		//todo rename to not a part of consensus
+		tmpDBPath          = flag.String("tmp-db-path", "./tmpdb", "Path to temporary DB")
+		streamDir          = flag.String("stream-dir", "", "Event stream directory")
+		txDir              = flag.String("tx-dir", "", "Transaction stream directory")
+		ethereumBlocksPath = flag.String("ethdb", "", "read only eth blocks db")
+		solBlocksPath      = flag.String("soldb", "", "read only sol blocks db")
+		rpcPort            = flag.String("rpc-port", ":8080", "Port for the JSON-RPC server")
 	)
+
+	_, _ = ethereumBlocksPath, solBlocksPath
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -34,6 +40,7 @@ func main() {
 	config.AppchainDBPath = *appchainDBPath
 	config.TmpDBPath = *tmpDBPath
 	config.EventStreamDir = *streamDir
+	config.TxStreamDir = *txDir
 
 	stateTransition := gosdk.BatchProcesser[*example.ExampleTransaction]{
 		example.NewStateTransitionExample[*example.ExampleTransaction](),

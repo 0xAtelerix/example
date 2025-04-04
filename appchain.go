@@ -38,10 +38,12 @@ func NewStateTransitionExample[AppTransaction types.AppTransaction]() *ExampleSt
 	return &ExampleStateTransition[AppTransaction]{}
 }
 
+// how to process appchain transactions
 func (s *ExampleStateTransition[AppTransaction]) ProcessTX(tx AppTransaction, dbtx kv.RwTx) ([]types.ExternalTransaction, error) {
 	return nil, nil
 }
 
+// how to external chains blocks
 func (s *ExampleStateTransition[AppTransaction]) ProcessBlock(block types.ExternalBlock, tx kv.RwTx) ([]types.ExternalTransaction, error) {
 	return nil, nil
 }
