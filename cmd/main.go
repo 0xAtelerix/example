@@ -112,7 +112,7 @@ func main() {
 	// Run appchain in goroutine
 	runErr := make(chan error, 1)
 	go func() {
-		runErr <- appchainExample.Run(ctx)
+		runErr <- appchainExample.Run(ctx, nil)
 	}()
 
 	select {
