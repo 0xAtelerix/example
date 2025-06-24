@@ -1,7 +1,7 @@
 filippo.io/edwards25519 v1.0.0-rc.1 h1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=
 filippo.io/edwards25519 v1.0.0-rc.1/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7eHn5EwJns=
-github.com/0xAtelerix/sdk/gosdk v0.0.0-20250624131837-b70408292025 h1:+4b6w7B2/8UkmplaxZLjpL55C9ibtotZ8CSeY1vYHcY=
-github.com/0xAtelerix/sdk/gosdk v0.0.0-20250624131837-b70408292025/go.mod h1:S9CHReQDGFa+Rky0ecCYIYHuJBZ8Y3Cc6JeVyfmHONg=
+github.com/0xAtelerix/sdk/gosdk v0.0.0-20250624151657-8ba1ad51eb29 h1:XkpusOFhAWrH5g/ReLYg690xb2M60pfVkbM9FFWoYiI=
+github.com/0xAtelerix/sdk/gosdk v0.0.0-20250624151657-8ba1ad51eb29/go.mod h1:S9CHReQDGFa+Rky0ecCYIYHuJBZ8Y3Cc6JeVyfmHONg=
 github.com/StackExchange/wmi v1.2.1 h1:VIkavFPXSjcnS+O8yTq7NI32k0R5Aj+v39y29VYDOSA=
 github.com/StackExchange/wmi v1.2.1/go.mod h1:rcmrprowKIVzvc+NUiLncP2uuArMWLCbu9SBzvHz7e8=
 github.com/VictoriaMetrics/fastcache v1.12.2 h1:N0y9ASrJ0F6h0QaC3o6uJb3NIZ9VKLjCM7NQbSmF7WI=

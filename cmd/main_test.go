@@ -1,4 +1,3 @@
-// main_test.go
 package main
 
 import (
@@ -16,24 +15,6 @@ import (
 
 	"github.com/0xAtelerix/example"
 )
-
-// waitUntil serves as a tiny helper that polls f() until it returns true or ctx
-// expires.
-func waitUntil(ctx context.Context, f func() bool) error {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if f() {
-				return nil
-			}
-		}
-	}
-}
 
 // TestEndToEnd spins up main(), posts a transaction to the /rpc endpoint and
 // verifies we get a 2xx response.
@@ -128,4 +109,22 @@ func getFreePort(t *testing.T) int {
 	}
 
 	return port
+}
+
+// waitUntil serves as a tiny helper that polls f() until it returns true or ctx
+// expires.
+func waitUntil(ctx context.Context, f func() bool) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if f() {
+				return nil
+			}
+		}
+	}
 }
