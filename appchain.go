@@ -4,7 +4,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/0xAtelerix/sdk/gosdk"
-	emitterproto "github.com/0xAtelerix/sdk/gosdk/proto"
 	"github.com/0xAtelerix/sdk/gosdk/types"
 )
 
@@ -39,10 +38,12 @@ func NewStateTransitionExample[AppTransaction types.AppTransaction]() *ExampleSt
 	return &ExampleStateTransition[AppTransaction]{}
 }
 
+// how to process appchain transactions
 func (s *ExampleStateTransition[AppTransaction]) ProcessTX(tx AppTransaction, dbtx kv.RwTx) ([]types.ExternalTransaction, error) {
 	return nil, nil
 }
 
+// how to external chains blocks
 func (s *ExampleStateTransition[AppTransaction]) ProcessBlock(block types.ExternalBlock, tx kv.RwTx) ([]types.ExternalTransaction, error) {
 	return nil, nil
 }
@@ -74,12 +75,12 @@ func AppchainExampleBlockConstructor(blockNumber uint64, stateRoot [32]byte, pre
 }
 
 // step 4:
-// How to communicate with validator
-// not sure that it is an appchain part.
-type EmitterServer struct {
-	emitterproto.UnimplementedEmitterServer
-}
+// How to verify that your block state transition is correct between validators
+type ExampleRootCalculator struct{}
 
-type HealthServer struct {
-	emitterproto.UnimplementedHealthServer
+func NewRootCalculatorExample() *ExampleRootCalculator {
+	return &ExampleRootCalculator{}
+}
+func (r *ExampleRootCalculator) StateRootCalculator(tx kv.RwTx) ([32]byte, error) {
+	return [32]byte{}, nil
 }

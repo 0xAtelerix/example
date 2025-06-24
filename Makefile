@@ -1,10 +1,9 @@
 
 run:
 	GOPRIVATE=github.com/0xAtelerix/* go run cmd/main.go \
-                                        -chain-id=42 \
                                         -emitter-port=:50051 \
                                         -db-path=./test \
-                                        -tmp-db-path=./test_tmp \
+                                        -local-db-path=./test_tmp \
                                         -stream-dir=./test_consenus/snapshot.data \
                                         -rpc-port=:8080
 get:
@@ -26,7 +25,7 @@ clean:
 dockerrun:
 	docker run --rm \
 	  -v $(PWD)/test_consenus:/test_consenus \
-	  abs/consensusdevnode:latest \
+	  b00ris/consensusnode:latest \
 	  --snapshot-dir=/test_consenus \
 	  --appchain=1=host.docker.internal:50051
 

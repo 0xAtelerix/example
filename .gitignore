@@ -1,6 +1,9 @@
 .idea
-go.sum
 test
 test_tmp
+chaindb
+localdb
 test_consenus
 test_consenus_app
+appchaindb
+tmpdb

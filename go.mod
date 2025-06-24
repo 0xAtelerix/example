@@ -5,6 +5,7 @@ go 1.24.1
 require (
 	github.com/0xAtelerix/sdk/gosdk v0.0.0-20250623103918-7214a972f25c
 	github.com/ledgerwatch/erigon-lib v1.0.0
+	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/rs/zerolog v1.34.0
 
 )
@@ -28,7 +29,6 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
-	github.com/ledgerwatch/log/v3 v3.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect

@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"syscall"
 
 	"github.com/0xAtelerix/sdk/gosdk"
@@ -14,45 +14,56 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
-
-	"github.com/0xAtelerix/example"
-
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/0xAtelerix/example"
 )
+
+const ChainID = 42
 
 func main() {
 	// CLI flags
+
+	config := gosdk.MakeAppchainConfig(ChainID)
 	var (
-		chainID        = flag.Uint64("chain-id", 42, "Chain ID of the appchain")
-		emitterPort    = flag.String("emitter-port", ":50051", "Emitter gRPC port")
-		appchainDBPath = flag.String("db-path", "./test", "Path to appchain DB")
-		streamDir      = flag.String("stream-dir", "", "Event stream directory")
-		rpcPort        = flag.String("rpc-port", ":8080", "Port for the JSON-RPC server")
+		emitterPort    = flag.String("emitter-port", config.EmitterPort, "Emitter gRPC port")
+		appchainDBPath = flag.String("db-path", config.AppchainDBPath, "Path to appchain DB")
+		streamDir      = flag.String("stream-dir", config.EventStreamDir, "Event stream directory")
+		txDir          = flag.String("tx-dir", config.TxStreamDir, "Transaction stream directory")
+
+		localDBPath        = flag.String("local-db-path", "./localdb", "Path to local DB")
+		ethereumBlocksPath = flag.String("ethdb", "", "read only eth blocks db")
+		solBlocksPath      = flag.String("soldb", "", "read only sol blocks db")
+		rpcPort            = flag.String("rpc-port", ":8080", "Port for the JSON-RPC server")
 	)
+
+	_, _ = ethereumBlocksPath, solBlocksPath
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	config := gosdk.MakeAppchainConfig(*chainID)
 	config.EmitterPort = *emitterPort
 	config.AppchainDBPath = *appchainDBPath
 	config.EventStreamDir = *streamDir
+	config.TxStreamDir = *txDir
 
 	stateTransition := gosdk.BatchProcesser[*example.ExampleTransaction]{
 		example.NewStateTransitionExample[*example.ExampleTransaction](),
 	}
 
-	txPoolDBPath := path.Join(config.AppchainDBPath, "./txpool_db")
-	txPoolDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(txPoolDBPath).
+	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(*localDBPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return txpool.TxPoolTables
 		}).
 		Open()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to local mdbx database")
+	}
+	txPool := txpool.NewTxPool[*example.ExampleTransaction](localDB)
 
-	txPool := txpool.NewTxPool[*example.ExampleTransaction](txPoolDB)
-
+	// инициализируем базу на нашей стороне
 	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(config.AppchainDBPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
@@ -93,7 +104,7 @@ func main() {
 
 	go func() {
 		log.Info().Str("rpc_port", *rpcPort).Msg("Starting JSON-RPC server")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal().Err(err).Msg("JSON-RPC server failed")
 		}
 	}()
