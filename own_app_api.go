@@ -62,7 +62,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(req.Params, &txReq); err != nil {
 			resp.Error = "Invalid parameters"
 		} else {
-			err := s.Pool.AddTransaction(txReq.Hash, &txReq.Transaction)
+			err := s.Pool.AddTransaction(&txReq.Transaction)
 			if err != nil {
 				resp.Error = "Failed to add transaction"
 			} else {
@@ -72,7 +72,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case "GetTransactionByHash":
 		var txReq struct {
-			Hash string `json:"hash"`
+			Hash []byte `json:"hash"`
 		}
 		if err := json.Unmarshal(req.Params, &txReq); err != nil {
 			resp.Error = "Invalid parameters"

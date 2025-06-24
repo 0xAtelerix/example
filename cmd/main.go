@@ -3,16 +3,22 @@ package main
 import (
 	"context"
 	"flag"
-	"github.com/0xAtelerix/example"
-	"github.com/0xAtelerix/sdk/gosdk"
-	"github.com/0xAtelerix/sdk/gosdk/txpool"
-
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"syscall"
+
+	"github.com/0xAtelerix/sdk/gosdk"
+	"github.com/0xAtelerix/sdk/gosdk/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	mdbxlog "github.com/ledgerwatch/log/v3"
+
+	"github.com/0xAtelerix/example"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
@@ -21,7 +27,6 @@ func main() {
 		chainID        = flag.Uint64("chain-id", 42, "Chain ID of the appchain")
 		emitterPort    = flag.String("emitter-port", ":50051", "Emitter gRPC port")
 		appchainDBPath = flag.String("db-path", "./test", "Path to appchain DB")
-		tmpDBPath      = flag.String("tmp-db-path", "./test_tmp", "Path to temporary DB")
 		streamDir      = flag.String("stream-dir", "", "Event stream directory")
 		rpcPort        = flag.String("rpc-port", ":8080", "Port for the JSON-RPC server")
 	)
@@ -32,26 +37,39 @@ func main() {
 	config := gosdk.MakeAppchainConfig(*chainID)
 	config.EmitterPort = *emitterPort
 	config.AppchainDBPath = *appchainDBPath
-	config.TmpDBPath = *tmpDBPath
 	config.EventStreamDir = *streamDir
 
 	stateTransition := gosdk.BatchProcesser[*example.ExampleTransaction]{
 		example.NewStateTransitionExample[*example.ExampleTransaction](),
 	}
-	rootCalculator := example.NewRootCalculatorExample()
 
-	txPool, err := txpool.NewTxPool[*example.ExampleTransaction](config.TmpDBPath)
+	txPoolDBPath := path.Join(config.AppchainDBPath, "./txpool_db")
+	txPoolDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(txPoolDBPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return txpool.TxPoolTables
+		}).
+		Open()
+
+	txPool := txpool.NewTxPool[*example.ExampleTransaction](txPoolDB)
+
+	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(config.AppchainDBPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return gosdk.DefaultTables
+		}).
+		Open()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize transaction pool")
+		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
 
 	log.Info().Msg("Starting appchain...")
 	appchainExample, err := gosdk.NewAppchain(
 		stateTransition,
-		rootCalculator,
 		example.AppchainExampleBlockConstructor,
 		txPool,
-		config)
+		config,
+		appchainDB)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to start appchain")
 	}

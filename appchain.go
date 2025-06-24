@@ -28,6 +28,7 @@ func (e *ExampleTransaction) Marshal() ([]byte, error) {
 func (e *ExampleTransaction) Unmarshal([]byte) error {
 	return nil
 }
+func (e *ExampleTransaction) Hash() [32]byte { return [32]byte{} }
 
 // step 2:
 // How do you process incoming transactions, external blocks and send external transactions
@@ -73,17 +74,6 @@ func AppchainExampleBlockConstructor(blockNumber uint64, stateRoot [32]byte, pre
 }
 
 // step 4:
-// How to verify that your block state transition is correct between validators
-type ExampleRootCalculator struct{}
-
-func NewRootCalculatorExample() *ExampleRootCalculator {
-	return &ExampleRootCalculator{}
-}
-func (r *ExampleRootCalculator) StateRootCalculator(tx kv.RwTx) ([32]byte, error) {
-	return [32]byte{}, nil
-}
-
-// step 5:
 // How to communicate with validator
 // not sure that it is an appchain part.
 type EmitterServer struct {
