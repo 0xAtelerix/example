@@ -52,6 +52,13 @@ jobs:
       - name: Add GOBIN to PATH
         run: echo "$GOBIN" >> $GITHUB_PATH
 
+      - name: Cache GOBIN (tools only)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GOBIN }}
+          key: ${{ runner.os }}-gobin-${{ hashFiles('**/go.sum') }}-v1
+          restore-keys: ${{ runner.os }}-gobin-
+
       - name: Git auth for private sdk (read-only)
         env:
           GH_SDK_TOKEN: ${{ secrets.GH_SDK_TOKEN }}
