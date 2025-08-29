@@ -21,7 +21,7 @@ env:
   TEST_SHUFFLE_SEED: ${{ github.run_id }}
 
 jobs:
-  lint-test:
+  CI:
     runs-on: ubuntu-latest
 
     steps:
