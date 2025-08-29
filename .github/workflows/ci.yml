@@ -61,6 +61,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}-
 
+      - name: Git auth for private sdk (read-only)
+        env:
+          GH_SDK_TOKEN: ${{ secrets.GH_SDK_TOKEN }}
+        run: |
+          test -n "$GH_SDK_TOKEN" || { echo "GH_SDK_TOKEN missing"; exit 1; }
+          git config --global url."https://x-access-token:${GH_SDK_TOKEN}@github.com/0xAtelerix/sdk".insteadOf "https://github.com/0xAtelerix/sdk"
+          git config --global url."https://x-access-token:${GH_SDK_TOKEN}@github.com/0xAtelerix/sdk/".insteadOf "https://github.com/0xAtelerix/sdk/"
+          go env -w GOPRIVATE=github.com/0xAtelerix/*
+
       - name: Deps (modules + golangci-lint)
         run: make deps
 
