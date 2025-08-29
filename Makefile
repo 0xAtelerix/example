@@ -71,3 +71,8 @@ deps-ci:
 
 lints:
 	$$(go env GOPATH)/bin/golangci-lint run ./... -v --timeout 10m
+
+.PHONY: coverage
+coverage:
+	go test -short -timeout 20m -failfast -shuffle=on -v ./... -coverprofile=cover.out -covermode=atomic -coverpkg=./... $(params)
+	go tool cover -html=cover.out -o coverage.html
