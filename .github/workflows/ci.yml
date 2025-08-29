@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+env:
+  GOPRIVATE: github.com/0xAtelerix/*
+  GOFLAGS: -mod=mod
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # If it's a PR, use the PR's last commit (HEAD). Otherwise use the workflow commit.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Fetch main (shallow)
+        run: |
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+          cache: true
+
+      - name: Capture Go cache paths
+        run: |
+          echo "GOMODCACHE=$(go env GOMODCACHE)" >> $GITHUB_ENV
+          echo "GOBIN=$(go env GOPATH)/bin" >> $GITHUB_ENV
+
+      - name: Add GOBIN to PATH
+        run: echo "$GOBIN" >> $GITHUB_PATH
+
+      - name: Cache build cache + tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ${{ env.GOMODCACHE }}
+            ${{ env.GOBIN }}
+          key: ${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/go.sum') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}-
+
+      - name: Deps (modules + golangci-lint)
+        run: make deps
+
+      - name: Lint (golangci-lint-action)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.4.0
+          args: -v --timeout=10m
+          github-token: ${{ github.token }}
+
+      - name: Test (no-race)
+        run: make tests
