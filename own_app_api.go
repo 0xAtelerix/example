@@ -1,7 +1,6 @@
 package example
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,10 +20,10 @@ type RPCRequest struct {
 
 // JSON-RPC response
 type RPCResponse struct {
-	ID      int         `json:"id"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   string      `json:"error,omitempty"`
-	JSONRPC string      `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  any    `json:"result,omitempty"`
+	Error   string `json:"error,omitempty"`
+	JSONRPC string `json:"jsonrpc"`
 }
 
 // RPCServer - обработчик JSON-RPC
@@ -36,35 +35,40 @@ type RPCServer[T apptypes.AppTransaction] struct {
 func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request", http.StatusBadRequest)
+
 		return
 	}
 	defer r.Body.Close()
 
 	var req RPCRequest
+
 	err = json.Unmarshal(body, &req)
 	if err != nil {
 		http.Error(w, "Invalid JSON-RPC request", http.StatusBadRequest)
+
 		return
 	}
 
 	var resp RPCResponse
+
 	resp.ID = req.ID
 	resp.JSONRPC = "2.0"
 
 	switch req.Method {
-	case "SendTransaction":
+	case SendTransactionMethod:
 		var txReq SendTransactionRequest[T]
 
-		if err := json.Unmarshal(req.Params, &txReq); err != nil {
+		if err = json.Unmarshal(req.Params, &txReq); err != nil {
 			resp.Error = fmt.Sprintf("Invalid parameters: %s, %s", err.Error(), req.Params)
 		} else {
-			err := s.Pool.AddTransaction(context.TODO(), txReq.Transaction)
+			err = s.Pool.AddTransaction(r.Context(), txReq.Transaction)
 			if err != nil {
 				resp.Error = fmt.Sprintf("Failed to add transaction: %s, %s", err.Error(), spew.Sdump(txReq.Transaction))
 			} else {
@@ -72,16 +76,18 @@ func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-	case "GetTransactionByHash":
+	case GetTransactionByHashMethod:
 		var txReq GetTransactionByHashRequest
 
-		if err := json.Unmarshal(req.Params, &txReq); err != nil {
+		if err = json.Unmarshal(req.Params, &txReq); err != nil {
 			resp.Error = fmt.Sprintf("Invalid parameters: %s, %s", err.Error(), req.Params)
 		} else {
 			var txHash [32]byte
 			copy(txHash[:], txReq.Hash)
 
-			tx, err := s.Pool.GetTransaction(context.TODO(), txHash[:])
+			var tx apptypes.AppTransaction
+
+			tx, err = s.Pool.GetTransaction(r.Context(), txHash[:])
 			if err != nil {
 				resp.Error = fmt.Sprintf("Transaction not found: err %s, %s, %s", err.Error(), txReq.Hash[:], txHash[:])
 			} else {
@@ -89,16 +95,18 @@ func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-	case "GetTransactionStatus":
+	case GetTransactionStatusMethod:
 		var txStatusReq GetTransactionStatus
 
-		if err := json.Unmarshal(req.Params, &txStatusReq); err != nil {
+		if err = json.Unmarshal(req.Params, &txStatusReq); err != nil {
 			resp.Error = fmt.Sprintf("Invalid parameters: %s, %s", err.Error(), req.Params)
 		} else {
 			var txHash [32]byte
 			copy(txHash[:], txStatusReq.Hash)
 
-			txStatus, err := s.Pool.GetTransactionStatus(context.TODO(), txHash[:])
+			var txStatus apptypes.TxStatus
+
+			txStatus, err = s.Pool.GetTransactionStatus(r.Context(), txHash[:])
 			if err != nil {
 				resp.Error = fmt.Sprintf("Transaction not found: err %s, %s, %s", err.Error(), txStatusReq.Hash[:], txHash[:])
 			} else {
@@ -111,16 +119,26 @@ func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+
+	err = json.NewEncoder(w).Encode(resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
+
+const SendTransactionMethod = "SendTransaction"
 
 type SendTransactionRequest[T apptypes.AppTransaction] struct {
 	Transaction T `json:"transaction"`
 }
 
+const GetTransactionByHashMethod = "GetTransactionByHash"
+
 type GetTransactionByHashRequest struct {
 	Hash string `json:"hash"`
 }
+
+const GetTransactionStatusMethod = "GetTransactionStatus"
 
 type GetTransactionStatus struct {
 	Hash string `json:"hash"`

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
@@ -24,8 +25,8 @@ const ChainID = 42
 
 func main() {
 	// CLI flags
-
 	config := gosdk.MakeAppchainConfig(ChainID)
+
 	var (
 		emitterPort    = flag.String("emitter-port", config.EmitterPort, "Emitter gRPC port")
 		appchainDBPath = flag.String("db-path", config.AppchainDBPath, "Path to appchain DB")
@@ -39,6 +40,7 @@ func main() {
 	)
 
 	_, _ = ethereumBlocksPath, solBlocksPath
+
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -48,13 +50,13 @@ func main() {
 	config.EventStreamDir = *streamDir
 	config.TxStreamDir = *txDir
 
-	stateTransition := gosdk.BatchProcesser[example.ExampleTransaction]{
-		StateTransitionSimplified: example.NewStateTransitionExample[example.ExampleTransaction](),
+	stateTransition := gosdk.BatchProcesser[example.Transaction]{
+		StateTransitionSimplified: example.NewStateTransitionExample[example.Transaction](),
 	}
 
 	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(*localDBPath).
-		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return txpool.Tables()
 		}).
 		Open()
@@ -65,7 +67,7 @@ func main() {
 	// инициализируем базу на нашей стороне
 	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(config.AppchainDBPath).
-		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return gosdk.DefaultTables()
 		}).
 		Open()
@@ -73,9 +75,10 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
 
-	txPool := txpool.NewTxPool[example.ExampleTransaction](localDB)
+	txPool := txpool.NewTxPool[example.Transaction](localDB)
 
 	log.Info().Msg("Starting appchain...")
+
 	appchainExample, err := gosdk.NewAppchain(
 		stateTransition,
 		example.AppchainExampleBlockConstructor,
@@ -100,12 +103,14 @@ func main() {
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.DefaultServeMux.ServeHTTP(w, r)
 		}),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	http.Handle("/rpc", &example.RPCServer[example.ExampleTransaction]{Pool: txPool})
+	http.Handle("/rpc", &example.RPCServer[example.Transaction]{Pool: txPool})
 
 	go func() {
 		log.Info().Str("rpc_port", *rpcPort).Msg("Starting JSON-RPC server")
+
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal().Err(err).Msg("JSON-RPC server failed")
 		}
@@ -113,6 +118,7 @@ func main() {
 
 	// Run appchain in goroutine
 	runErr := make(chan error, 1)
+
 	go func() {
 		runErr <- appchainExample.Run(ctx, nil)
 	}()
@@ -121,12 +127,14 @@ func main() {
 	case sig := <-signalChan:
 		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
 		cancel()
+
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
 	case err := <-runErr:
 		log.Error().Err(err).Msg("Appchain stopped with error")
 		cancel()
+
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
