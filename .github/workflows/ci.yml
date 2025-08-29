@@ -82,3 +82,6 @@ jobs:
 
       - name: Test (no-race)
         run: make tests
+
+      - name: Test (race)
+        run: make race-tests
