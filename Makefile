@@ -74,5 +74,5 @@ lints:
 
 .PHONY: coverage
 coverage:
-	go test -short -timeout 20m -failfast -shuffle=on -v ./... -coverprofile=cover.out -covermode=atomic -coverpkg=./... $(params)
+	go test -short -timeout 20m -failfast -shuffle=${{ env.TEST_SHUFFLE_SEED }} -v ./... -coverprofile=cover.out -covermode=atomic -coverpkg=./... $(params)
 	go tool cover -html=cover.out -o coverage.html

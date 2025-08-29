@@ -18,6 +18,7 @@ permissions:
 env:
   GOPRIVATE: github.com/0xAtelerix/*
   GOFLAGS: -mod=mod
+  TEST_SHUFFLE_SEED: ${{ github.run_id }}
 
 jobs:
   lint-test:
