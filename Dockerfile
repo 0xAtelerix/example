@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1.4
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git gcc musl-dev openssh
-
+RUN apk add --no-cache git gcc musl-dev openssh ca-certificates && update-ca-certificates
 WORKDIR /app
 
 # GOPRIVATE — если есть приватные импорты
@@ -18,7 +17,7 @@ COPY go.mod go.sum ./
 RUN --mount=type=ssh go mod download
 
 COPY . .
-RUN go build -o appchain ./cmd/main.go
+RUN go build -race -o appchain ./cmd/main.go
 
 # Финальный образ
 FROM alpine:latest

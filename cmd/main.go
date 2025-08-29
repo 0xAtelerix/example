@@ -48,31 +48,32 @@ func main() {
 	config.EventStreamDir = *streamDir
 	config.TxStreamDir = *txDir
 
-	stateTransition := gosdk.BatchProcesser[*example.ExampleTransaction]{
-		example.NewStateTransitionExample[*example.ExampleTransaction](),
+	stateTransition := gosdk.BatchProcesser[example.ExampleTransaction]{
+		StateTransitionSimplified: example.NewStateTransitionExample[example.ExampleTransaction](),
 	}
 
 	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(*localDBPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-			return txpool.TxPoolTables
+			return txpool.Tables()
 		}).
 		Open()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to local mdbx database")
 	}
-	txPool := txpool.NewTxPool[*example.ExampleTransaction](localDB)
 
 	// инициализируем базу на нашей стороне
 	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(config.AppchainDBPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-			return gosdk.DefaultTables
+			return gosdk.DefaultTables()
 		}).
 		Open()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
+
+	txPool := txpool.NewTxPool[example.ExampleTransaction](localDB)
 
 	log.Info().Msg("Starting appchain...")
 	appchainExample, err := gosdk.NewAppchain(
@@ -100,7 +101,8 @@ func main() {
 			http.DefaultServeMux.ServeHTTP(w, r)
 		}),
 	}
-	http.Handle("/rpc", &example.RPCServer{Pool: txPool})
+
+	http.Handle("/rpc", &example.RPCServer[example.ExampleTransaction]{Pool: txPool})
 
 	go func() {
 		log.Info().Str("rpc_port", *rpcPort).Msg("Starting JSON-RPC server")

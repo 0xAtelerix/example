@@ -1,11 +1,14 @@
 package example
 
 import (
-	"github.com/0xAtelerix/sdk/gosdk/types"
-
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/0xAtelerix/sdk/gosdk/apptypes"
+	"github.com/davecgh/go-spew/spew"
 )
 
 // JSON-RPC request
@@ -25,11 +28,12 @@ type RPCResponse struct {
 }
 
 // RPCServer - обработчик JSON-RPC
-type RPCServer struct {
-	Pool types.TxPoolInterface[*ExampleTransaction]
+type RPCServer[T apptypes.AppTransaction] struct {
+	Pool apptypes.TxPoolInterface[T]
 }
 
-func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// todo: add context
+func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
@@ -55,33 +59,50 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Method {
 	case "SendTransaction":
-		var txReq struct {
-			Hash        string             `json:"hash"`
-			Transaction ExampleTransaction `json:"transaction"`
-		}
+		var txReq SendTransactionRequest[T]
+
 		if err := json.Unmarshal(req.Params, &txReq); err != nil {
-			resp.Error = "Invalid parameters"
+			resp.Error = fmt.Sprintf("Invalid parameters: %s, %s", err.Error(), req.Params)
 		} else {
-			err := s.Pool.AddTransaction(&txReq.Transaction)
+			err := s.Pool.AddTransaction(context.TODO(), txReq.Transaction)
 			if err != nil {
-				resp.Error = "Failed to add transaction"
+				resp.Error = fmt.Sprintf("Failed to add transaction: %s, %s", err.Error(), spew.Sdump(txReq.Transaction))
 			} else {
-				resp.Result = map[string]string{"message": "Transaction added"}
+				resp.Result = map[string]string{"message": fmt.Sprintf("Transaction added: %s", txReq.Transaction.Hash())}
 			}
 		}
 
 	case "GetTransactionByHash":
-		var txReq struct {
-			Hash []byte `json:"hash"`
-		}
+		var txReq GetTransactionByHashRequest
+
 		if err := json.Unmarshal(req.Params, &txReq); err != nil {
-			resp.Error = "Invalid parameters"
+			resp.Error = fmt.Sprintf("Invalid parameters: %s, %s", err.Error(), req.Params)
 		} else {
-			tx, err := s.Pool.GetTransaction(txReq.Hash)
+			var txHash [32]byte
+			copy(txHash[:], txReq.Hash)
+
+			tx, err := s.Pool.GetTransaction(context.TODO(), txHash[:])
 			if err != nil {
-				resp.Error = "Transaction not found"
+				resp.Error = fmt.Sprintf("Transaction not found: err %s, %s, %s", err.Error(), txReq.Hash[:], txHash[:])
 			} else {
 				resp.Result = tx
+			}
+		}
+
+	case "GetTransactionStatus":
+		var txStatusReq GetTransactionStatus
+
+		if err := json.Unmarshal(req.Params, &txStatusReq); err != nil {
+			resp.Error = fmt.Sprintf("Invalid parameters: %s, %s", err.Error(), req.Params)
+		} else {
+			var txHash [32]byte
+			copy(txHash[:], txStatusReq.Hash)
+
+			txStatus, err := s.Pool.GetTransactionStatus(context.TODO(), txHash[:])
+			if err != nil {
+				resp.Error = fmt.Sprintf("Transaction not found: err %s, %s, %s", err.Error(), txStatusReq.Hash[:], txHash[:])
+			} else {
+				resp.Result = txStatus.String()
 			}
 		}
 
@@ -91,4 +112,16 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+type SendTransactionRequest[T apptypes.AppTransaction] struct {
+	Transaction T `json:"transaction"`
+}
+
+type GetTransactionByHashRequest struct {
+	Hash string `json:"hash"`
+}
+
+type GetTransactionStatus struct {
+	Hash string `json:"hash"`
 }

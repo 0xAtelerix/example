@@ -18,9 +18,6 @@ tidy:
 env:
 	go env -w GOPRIVATE=github.com/0xAtelerix/sdkenv:
 	go env -w GOPRIVATE=github.com/0xAtelerix/sdk
-clean:
-	rm -r ./test/*
-	rm -r ./test_tmp/*
 
 dockerrun:
 	docker run --rm \
@@ -47,3 +44,6 @@ down:
 
 ## Перезапуск
 restart: down up
+
+clean:
+	rm -Rdf appchain localdb test chaindb test_tmp test_consenus_app test_consenus/events test_consenus/fetcher

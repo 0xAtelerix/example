@@ -64,6 +64,7 @@ func TestEndToEnd(t *testing.T) {
 	tx := example.ExampleTransaction{
 		Sender: "Vasya",
 		Value:  42,
+		TxHash: "deadbeef",
 	}
 
 	var buf bytes.Buffer
