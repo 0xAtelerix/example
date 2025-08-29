@@ -52,17 +52,6 @@ jobs:
       - name: Add GOBIN to PATH
         run: echo "$GOBIN" >> $GITHUB_PATH
 
-      - name: Cache build cache + tools
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ${{ env.GOMODCACHE }}
-            ${{ env.GOBIN }}
-          key: ${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/go.sum') }}-v1
-          restore-keys: |
-            ${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}-
-
       - name: Git auth for private sdk (read-only)
         env:
           GH_SDK_TOKEN: ${{ secrets.GH_SDK_TOKEN }}
