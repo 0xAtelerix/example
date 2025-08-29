@@ -83,6 +83,9 @@ jobs:
           go test -short -timeout 20m -failfast -shuffle=${{ env.TEST_SHUFFLE_SEED }} -v ./... -coverprofile=cover.out -covermode=atomic -coverpkg=./... $(params)
           go tool cover -html=cover.out -o coverage.html
 
+      - name: PR coverage comment
+        uses: k1LoW/octocov-action@v1
+
       - name: Enforce coverage thresholds
         uses: vladopajic/go-test-coverage@v2
         with:
