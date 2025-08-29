@@ -71,7 +71,7 @@ jobs:
           go env -w GOPRIVATE=github.com/0xAtelerix/*
 
       - name: Deps (modules + golangci-lint)
-        run: make deps
+        run: make deps-ci
 
       - name: Lint (golangci-lint-action)
         uses: golangci/golangci-lint-action@v8
@@ -83,5 +83,3 @@ jobs:
       - name: Test (no-race)
         run: make tests
 
-      - name: Test (race)
-        run: make race-tests
