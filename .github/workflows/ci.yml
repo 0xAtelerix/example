@@ -81,8 +81,8 @@ jobs:
           args: -v --timeout=10m
           github-token: ${{ github.token }}
 
-      - name: Test (no-race)
-        run: make tests
+      - name: Test (no-race) with coverage
+        run: make coverage
 
       - name: Enforce coverage thresholds
         uses: vladopajic/go-test-coverage@v2
