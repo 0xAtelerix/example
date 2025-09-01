@@ -27,12 +27,12 @@ type RPCResponse struct {
 }
 
 // RPCServer - обработчик JSON-RPC
-type RPCServer[T apptypes.AppTransaction] struct {
-	Pool apptypes.TxPoolInterface[T]
+type RPCServer struct {
+	Pool apptypes.TxPoolInterface[Transaction]
 }
 
 // todo: add context
-func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 
@@ -63,7 +63,7 @@ func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Method {
 	case SendTransactionMethod:
-		var txReq SendTransactionRequest[T]
+		var txReq SendTransactionRequest
 
 		if err = json.Unmarshal(req.Params, &txReq); err != nil {
 			resp.Error = fmt.Sprintf("Invalid parameters: %s, %s", err.Error(), req.Params)
@@ -85,7 +85,7 @@ func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var txHash [32]byte
 			copy(txHash[:], txReq.Hash)
 
-			var tx apptypes.AppTransaction
+			var tx Transaction
 
 			tx, err = s.Pool.GetTransaction(r.Context(), txHash[:])
 			if err != nil {
@@ -128,8 +128,8 @@ func (s *RPCServer[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 const SendTransactionMethod = "SendTransaction"
 
-type SendTransactionRequest[T apptypes.AppTransaction] struct {
-	Transaction T `json:"transaction"`
+type SendTransactionRequest struct {
+	Transaction Transaction `json:"transaction"`
 }
 
 const GetTransactionByHashMethod = "GetTransactionByHash"

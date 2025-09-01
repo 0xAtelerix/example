@@ -45,7 +45,7 @@ func TestEndToEnd(t *testing.T) {
 		"-tx-dir", txDir,
 	}
 
-	go main() // NB: main() never returns except on fatal, so run in goroutine
+	go Run(t.Context())
 
 	// wait until HTTP service is up
 	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/rpc", port)

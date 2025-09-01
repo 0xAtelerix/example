@@ -24,6 +24,14 @@ import (
 const ChainID = 42
 
 func main() {
+	// Context with cancel for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	Run(ctx)
+}
+
+func Run(ctx context.Context) {
 	// CLI flags
 	config := gosdk.MakeAppchainConfig(ChainID)
 
@@ -89,10 +97,6 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to start appchain")
 	}
 
-	// Context with cancel for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// Catch system signals
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
@@ -106,7 +110,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	http.Handle("/rpc", &example.RPCServer[example.Transaction]{Pool: txPool})
+	http.Handle("/rpc", &example.RPCServer{Pool: txPool})
 
 	go func() {
 		log.Info().Str("rpc_port", *rpcPort).Msg("Starting JSON-RPC server")
@@ -120,20 +124,29 @@ func main() {
 	runErr := make(chan error, 1)
 
 	go func() {
-		runErr <- appchainExample.Run(ctx, nil)
+		select {
+		case <-ctx.Done():
+			// nothing to do
+		case runErr <- appchainExample.Run(ctx, nil):
+			// nothing to do
+		}
 	}()
 
 	select {
+	case <-ctx.Done():
+		log.Info().Str("shutting down", ctx.Err().Error()).Msg("Received shutdown signal")
+
+		if err := server.Shutdown(context.Background()); err != nil {
+			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
+		}
 	case sig := <-signalChan:
 		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
-		cancel()
 
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
 	case err := <-runErr:
 		log.Error().Err(err).Msg("Appchain stopped with error")
-		cancel()
 
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")

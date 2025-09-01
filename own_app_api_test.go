@@ -36,7 +36,7 @@ func TestTxPool(t *testing.T) {
 		t.Error("wrong method", reqAdd.Method)
 	}
 
-	var txReqAdd SendTransactionRequest[Transaction]
+	var txReqAdd SendTransactionRequest
 
 	err = json.Unmarshal(reqAdd.Params, &txReqAdd)
 	require.NoError(t, err)
