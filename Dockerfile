@@ -17,7 +17,7 @@ COPY go.mod go.sum ./
 RUN --mount=type=ssh go mod download
 
 COPY . .
-RUN go build -race -o appchain ./cmd/main.go
+RUN go build -o appchain ./cmd/main.go
 
 # Финальный образ
 FROM alpine:latest
