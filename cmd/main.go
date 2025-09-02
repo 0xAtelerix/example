@@ -136,18 +136,21 @@ func Run(ctx context.Context) {
 	case <-ctx.Done():
 		log.Info().Str("shutting down", ctx.Err().Error()).Msg("Received shutdown signal")
 
+		//nolint:contextcheck // shutdown, the context above is already expired
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
 	case sig := <-signalChan:
 		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
 
+		//nolint:contextcheck // shutdown, the context above is already expired
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
 	case err := <-runErr:
 		log.Error().Err(err).Msg("Appchain stopped with error")
 
+		//nolint:contextcheck // shutdown, the context above is already expired
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
