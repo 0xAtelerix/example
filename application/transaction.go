@@ -47,18 +47,32 @@ func (e Transaction[R]) Process(
 
 	senderBalanceData, err = dbTx.GetOne(accountsBucket, senderTokenKey)
 	if err != nil {
-		return
+		return res, txs, err
 	}
 
 	if len(senderBalanceData) == 0 {
-		return R{}, nil, fmt.Errorf("%w: sender %s, token %s, actual balance %d, value %d", ErrNotEnoughBalance, e.Sender, e.Token, 0, e.Value)
+		return R{}, nil, fmt.Errorf(
+			"%w: sender %s, token %s, actual balance %d, value %d",
+			ErrNotEnoughBalance,
+			e.Sender,
+			e.Token,
+			0,
+			e.Value,
+		)
 	}
 
 	senderBalance := &uint256.Int{}
 	senderBalance.SetBytes(senderBalanceData)
 
 	if senderBalance.CmpUint64(e.Value) < 0 {
-		return R{}, nil, fmt.Errorf("%w: sender %s, token %s, actual balance %d, value %d", ErrNotEnoughBalance, e.Sender, e.Token, senderBalance, e.Value)
+		return R{}, nil, fmt.Errorf(
+			"%w: sender %s, token %s, actual balance %d, value %d",
+			ErrNotEnoughBalance,
+			e.Sender,
+			e.Token,
+			senderBalance,
+			e.Value,
+		)
 	}
 
 	var receiverBalanceData []byte
