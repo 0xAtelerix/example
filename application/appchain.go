@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	_ gosdk.StateTransitionSimplified[Transaction] = &StateTransition[Transaction]{}
-	_ gosdk.StateTransitionInterface[Transaction]  = gosdk.BatchProcesser[Transaction]{}
-	_ apptypes.AppchainBlock                       = &Block{}
+	_ gosdk.StateTransitionSimplified                               = &StateTransition{}
+	_ gosdk.StateTransitionInterface[Transaction[Receipt], Receipt] = gosdk.BatchProcesser[Transaction[Receipt], Receipt]{}
+	_ apptypes.AppchainBlock                                        = &Block{}
 )

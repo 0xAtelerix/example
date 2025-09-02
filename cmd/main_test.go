@@ -70,7 +70,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	// build & send a transaction
-	tx := application.Transaction{
+	tx := application.Transaction[application.Receipt]{
 		Sender: "Vasya",
 		Value:  42,
 		TxHash: "deadbeef",

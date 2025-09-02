@@ -30,7 +30,7 @@ type RPCResponse struct {
 
 // RPCServer - обработчик JSON-RPC
 type RPCServer struct {
-	Pool apptypes.TxPoolInterface[application.Transaction]
+	Pool apptypes.TxPoolInterface[application.Transaction[application.Receipt], application.Receipt]
 }
 
 // todo: add context
@@ -87,7 +87,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var txHash [32]byte
 			copy(txHash[:], txReq.Hash)
 
-			var tx application.Transaction
+			var tx application.Transaction[application.Receipt]
 
 			tx, err = s.Pool.GetTransaction(r.Context(), txHash[:])
 			if err != nil {
@@ -131,7 +131,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 const SendTransactionMethod = "SendTransaction"
 
 type SendTransactionRequest struct {
-	Transaction application.Transaction `json:"transaction"`
+	Transaction application.Transaction[application.Receipt] `json:"transaction"`
 }
 
 const GetTransactionByHashMethod = "GetTransactionByHash"

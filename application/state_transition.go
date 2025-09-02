@@ -8,22 +8,14 @@ import (
 // step 2:
 // How do you process incoming transactions, external blocks and send external transactions
 // We strongly recomment to keep it stateless
-type StateTransition[AppTransaction apptypes.AppTransaction] struct{}
+type StateTransition struct{}
 
-func NewStateTransition[AppTransaction apptypes.AppTransaction]() *StateTransition[AppTransaction] {
-	return &StateTransition[AppTransaction]{}
-}
-
-// how to process appchain transactions
-func (*StateTransition[AppTransaction]) ProcessTX(
-	_ AppTransaction,
-	_ kv.RwTx,
-) ([]apptypes.ExternalTransaction, error) {
-	return nil, nil
+func NewStateTransition() *StateTransition {
+	return &StateTransition{}
 }
 
 // how to external chains blocks
-func (*StateTransition[AppTransaction]) ProcessBlock(
+func (*StateTransition) ProcessBlock(
 	_ apptypes.ExternalBlock,
 	_ kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {

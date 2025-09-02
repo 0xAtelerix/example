@@ -59,8 +59,8 @@ func Run(ctx context.Context) {
 	config.EventStreamDir = *streamDir
 	config.TxStreamDir = *txDir
 
-	stateTransition := gosdk.BatchProcesser[application.Transaction]{
-		StateTransitionSimplified: application.NewStateTransition[application.Transaction](),
+	stateTransition := gosdk.BatchProcesser[application.Transaction[application.Receipt], application.Receipt]{
+		StateTransitionSimplified: application.NewStateTransition(),
 	}
 
 	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
@@ -84,7 +84,9 @@ func Run(ctx context.Context) {
 		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
 
-	txPool := txpool.NewTxPool[application.Transaction](localDB)
+	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
+		localDB,
+	)
 
 	log.Info().Msg("Starting appchain...")
 

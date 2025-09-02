@@ -22,7 +22,9 @@ func TestTxPool(t *testing.T) {
 		Open()
 	require.NoError(t, err)
 
-	txPool := txpool.NewTxPool[application.Transaction](localDB)
+	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
+		localDB,
+	)
 
 	// add
 	body := []byte(
@@ -48,7 +50,7 @@ func TestTxPool(t *testing.T) {
 
 	txHash := txReqAdd.Transaction.Hash()
 
-	var txFromGet application.Transaction
+	var txFromGet application.Transaction[application.Receipt]
 
 	txFromGet, err = txPool.GetTransaction(t.Context(), txHash[:])
 	require.NoError(t, err)
@@ -71,7 +73,7 @@ func TestTxPool(t *testing.T) {
 
 	var (
 		txReqGet GetTransactionByHashRequest
-		gotTx    application.Transaction
+		gotTx    application.Transaction[application.Receipt]
 	)
 
 	err = json.Unmarshal(reqGet.Params, &txReqGet)
