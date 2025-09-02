@@ -43,21 +43,29 @@ func (e Transaction[R]) Process(
 	// get sender's balance
 	var senderBalanceData []byte
 
-	senderBalanceData, err = dbTx.GetOne(accountsBucket, AccountKey(e.Sender, e.Token))
+	senderTokenKey := AccountKey(e.Sender, e.Token)
+
+	senderBalanceData, err = dbTx.GetOne(accountsBucket, senderTokenKey)
 	if err != nil {
-		return res, txs, err
+		return
+	}
+
+	if len(senderBalanceData) == 0 {
+		return R{}, nil, fmt.Errorf("%w: sender %s, token %s, actual balance %d, value %d", ErrNotEnoughBalance, e.Sender, e.Token, 0, e.Value)
 	}
 
 	senderBalance := &uint256.Int{}
 	senderBalance.SetBytes(senderBalanceData)
 
 	if senderBalance.CmpUint64(e.Value) < 0 {
-		return R{}, nil, ErrNotEnoughBalance
+		return R{}, nil, fmt.Errorf("%w: sender %s, token %s, actual balance %d, value %d", ErrNotEnoughBalance, e.Sender, e.Token, senderBalance, e.Value)
 	}
 
 	var receiverBalanceData []byte
 
-	receiverBalanceData, err = dbTx.GetOne(accountsBucket, AccountKey(e.Receiver, e.Token))
+	receiverTokenKey := AccountKey(e.Receiver, e.Token)
+
+	receiverBalanceData, err = dbTx.GetOne(accountsBucket, receiverTokenKey)
 	if err != nil {
 		return res, txs, err
 	}
@@ -69,15 +77,15 @@ func (e Transaction[R]) Process(
 
 	// add receiver's balance
 	// reduce sender's balance
-	receiverBalance = receiverBalance.Add(receiverBalance, amount)
-	senderBalance = senderBalance.Sub(senderBalance, amount)
+	receiverBalance.Add(receiverBalance, amount)
+	senderBalance.Sub(senderBalance, amount)
 
-	err = dbTx.Put(accountsBucket, AccountKey(e.Sender, e.Token), senderBalance.Bytes())
+	err = dbTx.Put(accountsBucket, senderTokenKey, senderBalance.Bytes())
 	if err != nil {
 		return R{}, nil, fmt.Errorf("can't store sender's balance %w", err)
 	}
 
-	err = dbTx.Put(accountsBucket, AccountKey(e.Receiver, e.Token), receiverBalance.Bytes())
+	err = dbTx.Put(accountsBucket, receiverTokenKey, receiverBalance.Bytes())
 	if err != nil {
 		return R{}, nil, fmt.Errorf("can't store receiver's balance %w", err)
 	}
@@ -94,7 +102,7 @@ func (e Transaction[R]) Process(
 }
 
 const (
-	accountsBucket = "appaccounts" // account+token -> value
+	accountsBucket = "appaccounts" // token+account -> value
 )
 
 func Tables() kv.TableCfg {
@@ -104,5 +112,5 @@ func Tables() kv.TableCfg {
 }
 
 func AccountKey(sender string, token string) []byte {
-	return []byte(sender + token)
+	return []byte(token + sender)
 }

@@ -25,8 +25,6 @@ func newRand() *rand.Rand { return rand.New(rand.NewSource(1)) }
 func u256Bytes(v uint64) []byte { return uint256.NewInt(v).Bytes() }
 
 func BenchmarkProcess_MDBX(b *testing.B) {
-	b.ReportAllocs()
-
 	// --- DB setup (not measured) ---
 	dir := b.TempDir()
 	dbPath := filepath.Join(dir, "bench.mdbx")
@@ -55,13 +53,25 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 	n := b.N
 
 	// Generate accounts and tokens.
-	// We deliberately add a '-' suffix to account IDs to avoid AccountKey collisions,
-	// since AccountKey concatenates sender+token without a separator.
-	accounts := make([]string, n)
+	accountCount := n % 100
+	if accountCount < 10 {
+		accountCount = 100
+	}
 
-	tokens := make([]string, n)
-	for i := range n {
-		accounts[i] = "A" + fmt.Sprintf("%08d-", i)
+	accounts := make([]string, accountCount)
+
+	for i := range accountCount {
+		accounts[i] = "A" + fmt.Sprintf("%08d", i)
+	}
+
+	tokenCount := n % 1000
+	if tokenCount == 0 {
+		tokenCount = 10
+	}
+
+	tokens := make([]string, tokenCount)
+
+	for i := range tokenCount {
 		tokens[i] = "T" + fmt.Sprintf("%08d", i)
 	}
 
@@ -69,7 +79,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 	// Values are in [1, 1_000_000]. Senders/receivers/tokens are sampled from those generated above.
 	txs := make([]Tx, n)
 
-	const maxValue = 1_000_000
+	maxValue := n * 100
 
 	// Track which (sender,token) pairs need initial balances.
 	type stKey struct{ s, t string }
@@ -77,11 +87,11 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 	requiredSenderPairs := make(map[stKey]struct{}, n)
 
 	for i := range n {
-		si := r.Intn(n)
-		ri := r.Intn(n)
-		ti := r.Intn(n)
+		si := r.Intn(accountCount)
+		ri := r.Intn(accountCount)
+		ti := r.Intn(tokenCount)
 
-		val := uint64(r.Intn(maxValue) + 1)
+		val := uint64(r.Intn(maxValue/100) + 1)
 
 		txs[i] = Tx{
 			Sender:   accounts[si],
@@ -103,7 +113,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 
 	for st := range requiredSenderPairs {
 		// Give every sender-token a healthy starting balance so all txs succeed.
-		if err = seedTx.Put(accountsBucket, AccountKey(st.s, st.t), u256Bytes(maxValue)); err != nil {
+		if err = seedTx.Put(accountsBucket, AccountKey(st.s, st.t), u256Bytes(uint64(maxValue))); err != nil {
 			seedTx.Rollback()
 			b.Fatalf("seed Put: %v", err)
 		}
@@ -112,6 +122,8 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 	if err = seedTx.Commit(); err != nil {
 		b.Fatalf("seed commit: %v", err)
 	}
+
+	seedTx.Rollback()
 
 	var errCount int
 
@@ -135,6 +147,8 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		b.Fatalf("bench commit: %v", err)
 	}
 
+	writeTx.Rollback()
+
 	b.StopTimer()
 
 	elapsed := time.Since(start)
@@ -142,95 +156,3 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "tx/s")
 	b.ReportMetric(float64(errCount), "errors")
 }
-
-// Optional variant: commit every K txs to simulate block boundaries or durability constraints.
-func BenchmarkProcess_MDBX_BatchedCommits(b *testing.B) {
-	r := newRand()
-
-	n := b.N
-
-	accounts := make([]string, n)
-
-	tokens := make([]string, n)
-	for i := range n {
-		accounts[i] = "A" + fmt.Sprintf("%08d-", i)
-		tokens[i] = "T" + fmt.Sprintf("%08d", i)
-	}
-
-	const maxValue = 1_000_000
-
-	txs := make([]Tx, n)
-
-	type stKey struct{ s, t string }
-
-	required := make(map[stKey]struct{}, n)
-
-	for i := range n {
-		si := r.Intn(n)
-		ri := r.Intn(n)
-		ti := r.Intn(n)
-		val := uint64(r.Intn(maxValue) + 1)
-
-		txs[i] = Tx{
-			Sender:   accounts[si],
-			Receiver: accounts[ri],
-			Token:    tokens[ti],
-			Value:    val,
-		}
-		required[stKey{accounts[si], tokens[ti]}] = struct{}{}
-	}
-
-	dir := b.TempDir()
-	dbPath := filepath.Join(dir, "bench_batched.mdbx")
-
-	db, err := mdbx.
-		NewMDBX(mdbxlog.New()).
-		Path(dbPath).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return gosdk.MergeTables(
-				gosdk.DefaultTables(),
-				Tables(),
-			)
-		}).
-		Open()
-	if err != nil {
-		b.Fatalf("open mdbx: %v", err)
-	}
-
-	b.Cleanup(db.Close)
-
-	ctx := context.Background()
-
-	seedTx, err := db.BeginRw(ctx)
-	if err != nil {
-		b.Fatalf("begin seed tx: %v", err)
-	}
-
-	for st := range required {
-		if err := seedTx.Put(accountsBucket, AccountKey(st.s, st.t), u256Bytes(maxValue)); err != nil {
-			seedTx.Rollback()
-			b.Fatalf("seed Put: %v", err)
-		}
-	}
-
-	if err := seedTx.Commit(); err != nil {
-		b.Fatalf("seed commit: %v", err)
-	}
-}
-
-/*
-Run:
-
-  go test -bench=Process -benchmem ./...
-
-Notes:
-
-- We keep seeding out of the timed region so the benchmark concentrates on the hot path
-  (GetOne + Put twice) inside a single MDBX write txn.
-- If you expect very large b.N (millions), you may want to bump MDBX map size or
-  run the batched-commit variant to keep write transactions bounded in size/time.
-- AccountKey(sender, token) concatenates without a separator; the account IDs above
-  intentionally end with '-' to avoid accidental collisions.
-- Receipt and ErrNotEnoughBalance are assumed to exist in your application package
-  (they’re referenced by Transaction[Receipt] and Process).
-*/
