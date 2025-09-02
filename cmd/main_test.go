@@ -15,7 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/0xAtelerix/example"
+	"github.com/0xAtelerix/example/application"
 )
 
 // TestEndToEnd spins up main(), posts a transaction to the /rpc endpoint and
@@ -70,7 +70,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	// build & send a transaction
-	tx := example.Transaction{
+	tx := application.Transaction{
 		Sender: "Vasya",
 		Value:  42,
 		TxHash: "deadbeef",

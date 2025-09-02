@@ -1,4 +1,4 @@
-package example
+package api
 
 import (
 	"encoding/json"
@@ -9,6 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/0xAtelerix/example/application"
 )
 
 func TestTxPool(t *testing.T) {
@@ -20,7 +22,7 @@ func TestTxPool(t *testing.T) {
 		Open()
 	require.NoError(t, err)
 
-	txPool := txpool.NewTxPool[Transaction](localDB)
+	txPool := txpool.NewTxPool[application.Transaction](localDB)
 
 	// add
 	body := []byte(
@@ -46,7 +48,7 @@ func TestTxPool(t *testing.T) {
 
 	txHash := txReqAdd.Transaction.Hash()
 
-	var txFromGet Transaction
+	var txFromGet application.Transaction
 
 	txFromGet, err = txPool.GetTransaction(t.Context(), txHash[:])
 	require.NoError(t, err)
@@ -69,7 +71,7 @@ func TestTxPool(t *testing.T) {
 
 	var (
 		txReqGet GetTransactionByHashRequest
-		gotTx    Transaction
+		gotTx    application.Transaction
 	)
 
 	err = json.Unmarshal(reqGet.Params, &txReqGet)

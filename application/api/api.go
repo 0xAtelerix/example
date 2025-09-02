@@ -1,4 +1,4 @@
-package example
+package api
 
 import (
 	"encoding/json"
@@ -8,6 +8,8 @@ import (
 
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/davecgh/go-spew/spew"
+
+	"github.com/0xAtelerix/example/application"
 )
 
 // JSON-RPC request
@@ -28,7 +30,7 @@ type RPCResponse struct {
 
 // RPCServer - обработчик JSON-RPC
 type RPCServer struct {
-	Pool apptypes.TxPoolInterface[Transaction]
+	Pool apptypes.TxPoolInterface[application.Transaction]
 }
 
 // todo: add context
@@ -85,7 +87,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var txHash [32]byte
 			copy(txHash[:], txReq.Hash)
 
-			var tx Transaction
+			var tx application.Transaction
 
 			tx, err = s.Pool.GetTransaction(r.Context(), txHash[:])
 			if err != nil {
@@ -129,7 +131,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 const SendTransactionMethod = "SendTransaction"
 
 type SendTransactionRequest struct {
-	Transaction Transaction `json:"transaction"`
+	Transaction application.Transaction `json:"transaction"`
 }
 
 const GetTransactionByHashMethod = "GetTransactionByHash"

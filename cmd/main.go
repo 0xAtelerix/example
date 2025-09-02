@@ -18,7 +18,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/0xAtelerix/example"
+	"github.com/0xAtelerix/example/application"
+	"github.com/0xAtelerix/example/application/api"
 )
 
 const ChainID = 42
@@ -58,8 +59,8 @@ func Run(ctx context.Context) {
 	config.EventStreamDir = *streamDir
 	config.TxStreamDir = *txDir
 
-	stateTransition := gosdk.BatchProcesser[example.Transaction]{
-		StateTransitionSimplified: example.NewStateTransitionExample[example.Transaction](),
+	stateTransition := gosdk.BatchProcesser[application.Transaction]{
+		StateTransitionSimplified: application.NewStateTransition[application.Transaction](),
 	}
 
 	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
@@ -83,13 +84,13 @@ func Run(ctx context.Context) {
 		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
 
-	txPool := txpool.NewTxPool[example.Transaction](localDB)
+	txPool := txpool.NewTxPool[application.Transaction](localDB)
 
 	log.Info().Msg("Starting appchain...")
 
 	appchainExample, err := gosdk.NewAppchain(
 		stateTransition,
-		example.AppchainExampleBlockConstructor,
+		application.BlockConstructor,
 		txPool,
 		config,
 		appchainDB)
@@ -110,7 +111,7 @@ func Run(ctx context.Context) {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	http.Handle("/rpc", &example.RPCServer{Pool: txPool})
+	http.Handle("/rpc", &api.RPCServer{Pool: txPool})
 
 	go func() {
 		log.Info().Str("rpc_port", *rpcPort).Msg("Starting JSON-RPC server")
