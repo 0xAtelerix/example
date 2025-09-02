@@ -77,7 +77,10 @@ func Run(ctx context.Context) {
 	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(config.AppchainDBPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return gosdk.DefaultTables()
+			return gosdk.MergeTables(
+				gosdk.DefaultTables(),
+				application.Tables(),
+			)
 		}).
 		Open()
 	if err != nil {

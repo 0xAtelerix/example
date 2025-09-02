@@ -6,7 +6,7 @@ import (
 )
 
 // step 2:
-// How do you process incoming transactions, external blocks and send external transactions
+// How do you process external blocks and send external transactions
 // We strongly recomment to keep it stateless
 type StateTransition struct{}
 

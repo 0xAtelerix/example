@@ -43,7 +43,7 @@ func (e Transaction[R]) Process(
 	// get sender's balance
 	var senderBalanceData []byte
 
-	senderBalanceData, err = dbTx.GetOne(accontsBucket, AccountKey(e.Sender, e.Token))
+	senderBalanceData, err = dbTx.GetOne(accountsBucket, AccountKey(e.Sender, e.Token))
 	if err != nil {
 		return res, txs, err
 	}
@@ -57,7 +57,7 @@ func (e Transaction[R]) Process(
 
 	var receiverBalanceData []byte
 
-	receiverBalanceData, err = dbTx.GetOne(accontsBucket, AccountKey(e.Receiver, e.Token))
+	receiverBalanceData, err = dbTx.GetOne(accountsBucket, AccountKey(e.Receiver, e.Token))
 	if err != nil {
 		return res, txs, err
 	}
@@ -72,12 +72,12 @@ func (e Transaction[R]) Process(
 	receiverBalance = receiverBalance.Add(receiverBalance, amount)
 	senderBalance = senderBalance.Sub(senderBalance, amount)
 
-	err = dbTx.Put(accontsBucket, AccountKey(e.Sender, e.Token), senderBalance.Bytes())
+	err = dbTx.Put(accountsBucket, AccountKey(e.Sender, e.Token), senderBalance.Bytes())
 	if err != nil {
 		return R{}, nil, fmt.Errorf("can't store sender's balance %w", err)
 	}
 
-	err = dbTx.Put(accontsBucket, AccountKey(e.Receiver, e.Token), receiverBalance.Bytes())
+	err = dbTx.Put(accountsBucket, AccountKey(e.Receiver, e.Token), receiverBalance.Bytes())
 	if err != nil {
 		return R{}, nil, fmt.Errorf("can't store receiver's balance %w", err)
 	}
@@ -90,16 +90,16 @@ func (e Transaction[R]) Process(
 		Token:           e.Token,
 	}
 
-	return res, nil, nil
+	return res, []apptypes.ExternalTransaction{}, nil
 }
 
 const (
-	accontsBucket = "appaccounts" // account+token -> value
+	accountsBucket = "appaccounts" // account+token -> value
 )
 
 func Tables() kv.TableCfg {
 	return kv.TableCfg{
-		accontsBucket: {},
+		accountsBucket: {},
 	}
 }
 
