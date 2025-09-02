@@ -127,7 +127,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 
 	var errCount int
 
-	writeTx, err := db.BeginRwNosync(ctx)
+	writeTx, err := db.BeginRw(ctx)
 	if err != nil {
 		b.Fatalf("begin bench tx: %v", err)
 	}
