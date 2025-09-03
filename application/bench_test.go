@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 	n := b.N
 
 	// Generate accounts and tokens.
-	accountCount := n % 100
+	accountCount := n / 1000
 	if accountCount < 10 {
 		accountCount = 100
 	}
@@ -64,8 +65,8 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		accounts[i] = "A" + fmt.Sprintf("%08d", i)
 	}
 
-	tokenCount := n % 1000
-	if tokenCount == 0 {
+	tokenCount := n / 10000
+	if tokenCount < 10 {
 		tokenCount = 10
 	}
 
@@ -102,6 +103,20 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		requiredSenderPairs[stKey{accounts[si], tokens[ti]}] = struct{}{}
 	}
 
+	// Build a sorted slice of (token, account) pairs so we seed in a stable order:
+	// first by token, then by account.
+	pairs := make([]stKey, 0, len(requiredSenderPairs))
+	for st := range requiredSenderPairs {
+		pairs = append(pairs, st)
+	}
+
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].t == pairs[j].t {
+			return pairs[i].s < pairs[j].s
+		}
+		return pairs[i].t < pairs[j].t
+	})
+
 	// Seed DB with sender balances for each (sender,token) pair that will be debited.
 	// Give each such pair a random balance in [value, 1_000_000], but ensure it's
 	// >= maxValue so we don't trip ErrNotEnoughBalance during the run.
@@ -111,9 +126,9 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		b.Fatalf("begin seed tx: %v", err)
 	}
 
-	for st := range requiredSenderPairs {
+	for _, st := range pairs {
 		// Give every sender-token a healthy starting balance so all txs succeed.
-		if err = seedTx.Put(accountsBucket, AccountKey(st.s, st.t), u256Bytes(uint64(maxValue))); err != nil {
+		if err = seedTx.Append(accountsBucket, AccountKey(st.s, st.t), u256Bytes(uint64(maxValue))); err != nil {
 			seedTx.Rollback()
 			b.Fatalf("seed Put: %v", err)
 		}
@@ -155,4 +170,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 
 	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "tx/s")
 	b.ReportMetric(float64(errCount), "errors")
+	b.ReportMetric(float64(accountCount), "accounts")
+	b.ReportMetric(float64(tokenCount), "tokens")
+	b.ReportMetric(float64(n), "transactions")
 }
