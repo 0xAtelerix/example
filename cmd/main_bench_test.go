@@ -176,6 +176,7 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 		LocalDBPath:    localDB,
 		EventStreamDir: streamDir,
 		TxStreamDir:    txDir,
+		UseFiber:       true,
 	}, ready)
 
 	rpcPort := <-ready

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"net"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
+	"github.com/goccy/go-json"
+	"github.com/gofiber/adaptor/v2"
+	"github.com/gofiber/fiber/v2"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
@@ -33,6 +37,7 @@ type RuntimeArgs struct {
 	EthereumBlocksPath string
 	SolBlocksPath      string
 	RPCPort            string
+	UseFiber           bool
 }
 
 func main() {
@@ -129,6 +134,27 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		log.Fatal().Err(err).Msg("Failed to start appchain")
 	}
 
+	// Run appchain in goroutine
+	runErr := make(chan error, 1)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			// nothing to do
+		case runErr <- appchainExample.Run(ctx, nil):
+			// nothing to do
+		}
+	}()
+
+	if args.UseFiber {
+		runFiber(ctx, args, txPool, runErr, ready)
+		return
+	}
+	// else: keep your net/http path if you want both
+	runStdHTTP(ctx, args, txPool, runErr, ready)
+}
+
+func runStdHTTP(ctx context.Context, args RuntimeArgs, txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt], runErr chan error, ready chan<- int) {
 	// Catch system signals
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
@@ -164,18 +190,6 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 
 	go func() { serveErr <- server.Serve(ln) }()
 
-	// Run appchain in goroutine
-	runErr := make(chan error, 1)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			// nothing to do
-		case runErr <- appchainExample.Run(ctx, nil):
-			// nothing to do
-		}
-	}()
-
 	select {
 	case <-ctx.Done():
 		log.Info().Str("shutting down", ctx.Err().Error()).Msg("Received shutdown signal")
@@ -198,5 +212,75 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
+	}
+}
+
+func runFiber(ctx context.Context, args RuntimeArgs, txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt], runErr chan error, ready chan<- int) {
+	// Use faster JSON codec (optional but recommended).
+	app := fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+		ReadTimeout:           0, // we already limit at TCP layer/timeouts around listener
+		JSONEncoder:           json.Marshal,
+		JSONDecoder:           json.Unmarshal,
+		// You can tune these if needed:
+		// Prefork:           true, // beware on macOS; better for Linux prod with SO_REUSEPORT
+		// ReduceMemoryUsage: true,
+	})
+
+	// Reuse your existing net/http handler without rewriting it.
+	h := &api.RPCServer{Pool: txPool}
+	app.All("/rpc", adaptor.HTTPHandler(h))
+
+	// Context-aware listener (satisfies `noctx` linter).
+	lc := &net.ListenConfig{}
+	ln, err := lc.Listen(ctx, "tcp", args.RPCPort) // ":0" allowed
+	if err != nil {
+		log.Fatal().Err(err).Msg("listen rpc")
+	}
+
+	// Publish chosen port (for your benchmark that starts on :0).
+	if ready != nil {
+		if ta, ok := ln.Addr().(*net.TCPAddr); ok {
+			ready <- ta.Port
+		} else {
+			ready <- 0
+		}
+		close(ready)
+	}
+
+	// Serve in background; Fiber provides Listener().
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- app.Listener(ln) }()
+
+	// Tie shutdown to ctx with a grace period.
+	const grace = 10 * time.Second
+
+	select {
+	case <-ctx.Done():
+		// Start graceful shutdown.
+		shutdownCh := make(chan struct{})
+		go func() {
+			_ = app.Shutdown()
+			close(shutdownCh)
+		}()
+
+		select {
+		case <-shutdownCh:
+		case <-time.After(grace):
+			// Force-close listener if needed (rare).
+			_ = ln.Close()
+		}
+
+		// Drain serveErr (Fiber returns error on closed listener).
+		<-serveErr
+
+	case err := <-serveErr:
+		// Crashed on its own.
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			log.Fatal().Err(err).Msg("Fiber server crashed")
+		}
+
+	case err := <-runErr:
+		log.Error().Err(err).Msg("Appchain stopped with error")
 	}
 }
