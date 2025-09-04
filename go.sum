@@ -2750,6 +2750,8 @@ filippo.io/edwards25519 v1.0.0-rc.1 h1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmG
 filippo.io/edwards25519 v1.0.0-rc.1/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7eHn5EwJns=
 gioui.org v0.0.0-20210308172011-57750fc8a0a6/go.mod h1:RSH6KIUZ0p2xy5zHDxgAM4zumjgTw83q2ge/PI+yyw8=
 git.sr.ht/~sbinet/gg v0.3.1/go.mod h1:KGYtlADtqsqANL9ueOFkWymvzUvLMQllU5Ixo+8v3pc=
+github.com/0xAtelerix/sdk v0.1.0 h1:jO8JH77oBdrQssHEN27aKALVzDE0ET7bZcpbLuU3abA=
+github.com/0xAtelerix/sdk v0.1.0/go.mod h1:DkoR4pOBfW0ggamwiU/MuFglqaUKvkk1cOQCgRYVt6s=
 github.com/0xAtelerix/sdk v0.1.1-0.20250904095327-0a167eb5586c h1:Yhl+f3jyKBXaQ7ILGy1518s6JCylvKUj6VfTICNpqN4=
 github.com/0xAtelerix/sdk v0.1.1-0.20250904095327-0a167eb5586c/go.mod h1:Aao1IrH/iUmQPbtJnYeVdQmcJj2/8iCu5SEi640/Skg=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
