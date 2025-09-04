@@ -45,7 +45,7 @@ func TestEndToEnd(t *testing.T) {
 		"-tx-dir", txDir,
 	}
 
-	go Run(t.Context())
+	go RunCLI(t.Context())
 
 	// wait until HTTP service is up
 	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/rpc", port)
@@ -132,22 +132,4 @@ func getFreePort(t *testing.T) int {
 	}
 
 	return port
-}
-
-// waitUntil serves as a tiny helper that polls f() until it returns true or ctx
-// expires.
-func waitUntil(ctx context.Context, f func() bool) error {
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if f() {
-				return nil
-			}
-		}
-	}
 }

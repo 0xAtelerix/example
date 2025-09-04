@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,47 +24,73 @@ import (
 
 const ChainID = 42
 
+type RuntimeArgs struct {
+	EmitterPort        string
+	AppchainDBPath     string
+	EventStreamDir     string
+	TxStreamDir        string
+	LocalDBPath        string
+	EthereumBlocksPath string
+	SolBlocksPath      string
+	RPCPort            string
+}
+
 func main() {
 	// Context with cancel for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	Run(ctx)
+	RunCLI(ctx)
 }
 
-func Run(ctx context.Context) {
-	// CLI flags
+func RunCLI(ctx context.Context) {
 	config := gosdk.MakeAppchainConfig(ChainID)
 
-	var (
-		emitterPort    = flag.String("emitter-port", config.EmitterPort, "Emitter gRPC port")
-		appchainDBPath = flag.String("db-path", config.AppchainDBPath, "Path to appchain DB")
-		streamDir      = flag.String("stream-dir", config.EventStreamDir, "Event stream directory")
-		txDir          = flag.String("tx-dir", config.TxStreamDir, "Transaction stream directory")
+	// Use a local FlagSet (no globals).
+	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
-		localDBPath        = flag.String("local-db-path", "./localdb", "Path to local DB")
-		ethereumBlocksPath = flag.String("ethdb", "", "read only eth blocks db")
-		solBlocksPath      = flag.String("soldb", "", "read only sol blocks db")
-		rpcPort            = flag.String("rpc-port", ":8080", "Port for the JSON-RPC server")
-	)
+	emitterPort := fs.String("emitter-port", config.EmitterPort, "Emitter gRPC port")
+	appchainDBPath := fs.String("db-path", config.AppchainDBPath, "Path to appchain DB")
+	streamDir := fs.String("stream-dir", config.EventStreamDir, "Event stream directory")
+	txDir := fs.String("tx-dir", config.TxStreamDir, "Transaction stream directory")
 
-	_, _ = ethereumBlocksPath, solBlocksPath
+	localDBPath := fs.String("local-db-path", "./localdb", "Path to local DB")
+	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
+	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
+	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
 
-	flag.Parse()
+	_ = fs.Parse(os.Args[1:])
 
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-
-	config.EmitterPort = *emitterPort
-	config.AppchainDBPath = *appchainDBPath
-	config.EventStreamDir = *streamDir
-	config.TxStreamDir = *txDir
-
-	stateTransition := gosdk.BatchProcesser[application.Transaction[application.Receipt], application.Receipt]{
-		StateTransitionSimplified: application.NewStateTransition(),
+	args := RuntimeArgs{
+		EmitterPort:        *emitterPort,
+		AppchainDBPath:     *appchainDBPath,
+		EventStreamDir:     *streamDir,
+		TxStreamDir:        *txDir,
+		LocalDBPath:        *localDBPath,
+		EthereumBlocksPath: *ethereumBlocksPath,
+		SolBlocksPath:      *solBlocksPath,
+		RPCPort:            *rpcPort,
 	}
 
+	Run(ctx, args, nil)
+}
+
+func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	config := gosdk.MakeAppchainConfig(ChainID)
+
+	config.EmitterPort = args.EmitterPort
+	config.AppchainDBPath = args.AppchainDBPath
+	config.EventStreamDir = args.EventStreamDir
+	config.TxStreamDir = args.TxStreamDir
+
+	stateTransition := gosdk.NewBatchProcesser[application.Transaction[application.Receipt]](
+		application.NewStateTransition(),
+	)
+
 	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(*localDBPath).
+		Path(args.LocalDBPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return txpool.Tables()
 		}).
@@ -87,7 +113,7 @@ func Run(ctx context.Context) {
 		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
 
-	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
+	txPool := txpool.NewTxPool[application.Transaction[application.Receipt]](
 		localDB,
 	)
 
@@ -108,23 +134,35 @@ func Run(ctx context.Context) {
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start JSON-RPC server in goroutine
+	mux := http.NewServeMux()
+	mux.Handle("/rpc", &api.RPCServer{Pool: txPool})
+
+	lc := &net.ListenConfig{}
+
+	ln, err := lc.Listen(ctx, "tcp", args.RPCPort) // ":0" allowed
+	if err != nil {
+		log.Fatal().Err(err).Msg("listen rpc")
+	}
+
+	if ready != nil {
+		if ta, ok := ln.Addr().(*net.TCPAddr); ok {
+			ready <- ta.Port // publish actual port
+		} else {
+			ready <- 0
+		}
+
+		close(ready)
+	}
+
 	server := &http.Server{
-		Addr: *rpcPort,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.DefaultServeMux.ServeHTTP(w, r)
-		}),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	http.Handle("/rpc", &api.RPCServer{Pool: txPool})
+	// serve
+	serveErr := make(chan error, 1)
 
-	go func() {
-		log.Info().Str("rpc_port", *rpcPort).Msg("Starting JSON-RPC server")
-
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal().Err(err).Msg("JSON-RPC server failed")
-		}
-	}()
+	go func() { serveErr <- server.Serve(ln) }()
 
 	// Run appchain in goroutine
 	runErr := make(chan error, 1)

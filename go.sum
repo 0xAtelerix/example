@@ -2766,6 +2766,10 @@ github.com/0xAtelerix/sdk v0.1.1-0.20250902134549-84eaa5f305ef h1:+NVJy1cqudoAaQ
 github.com/0xAtelerix/sdk v0.1.1-0.20250902134549-84eaa5f305ef/go.mod h1:Aao1IrH/iUmQPbtJnYeVdQmcJj2/8iCu5SEi640/Skg=
 github.com/0xAtelerix/sdk v0.1.1-0.20250902165712-134d4e8a26d5 h1:WjNWVhE8LQbrGxAhjF1VbpGlf1p3SsafJzMYPXE8uCM=
 github.com/0xAtelerix/sdk v0.1.1-0.20250902165712-134d4e8a26d5/go.mod h1:Aao1IrH/iUmQPbtJnYeVdQmcJj2/8iCu5SEi640/Skg=
+github.com/0xAtelerix/sdk v0.1.1-0.20250903084010-793e3f27110e h1:aXxrNkdlr4/Mrd2g9v8Vwe2myaxLI5nu0vLSMT0tgV0=
+github.com/0xAtelerix/sdk v0.1.1-0.20250903084010-793e3f27110e/go.mod h1:Aao1IrH/iUmQPbtJnYeVdQmcJj2/8iCu5SEi640/Skg=
+github.com/0xAtelerix/sdk v0.1.1-0.20250903084541-d2eebcdf7c00 h1:MZ3XbbDWVR77i+Ujmp3/jxf1BryqSAa95WVyvNz9lVE=
+github.com/0xAtelerix/sdk v0.1.1-0.20250903084541-d2eebcdf7c00/go.mod h1:Aao1IrH/iUmQPbtJnYeVdQmcJj2/8iCu5SEi640/Skg=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.5.0/go.mod h1:dppbR7CwXD4pgtV9t3wD1812RaLDcBjtblcDF5f1vI0=

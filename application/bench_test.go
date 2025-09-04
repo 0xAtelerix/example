@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/holiman/uint256"
@@ -62,23 +62,20 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 	accounts := make([]string, accountCount)
 
 	for i := range accountCount {
-		accounts[i] = "A" + fmt.Sprintf("%08d", i)
+		accounts[i] = fmt.Sprintf("A%08d", i)
 	}
 
-	tokenCount := n / 10000
-	if tokenCount < 10 {
-		tokenCount = 10
-	}
+	tokenCount := 50
 
 	tokens := make([]string, tokenCount)
 
 	for i := range tokenCount {
-		tokens[i] = "T" + fmt.Sprintf("%08d", i)
+		tokens[i] = fmt.Sprintf("T%08d", i)
 	}
 
 	// Prepare transactions.
 	// Values are in [1, 1_000_000]. Senders/receivers/tokens are sampled from those generated above.
-	txs := make([]Tx, n)
+	txs := make([]*Tx, n)
 
 	maxValue := n * 100
 
@@ -94,12 +91,15 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 
 		val := uint64(r.Intn(maxValue/100) + 1)
 
-		txs[i] = Tx{
+		txs[i] = &Tx{
 			Sender:   accounts[si],
 			Receiver: accounts[ri],
 			Token:    tokens[ti],
 			Value:    val,
 		}
+
+		GetAccountKey(txs[i].Sender, txs[i].Token) // warm-up cache
+
 		requiredSenderPairs[stKey{accounts[si], tokens[ti]}] = struct{}{}
 	}
 
@@ -114,6 +114,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		if pairs[i].t == pairs[j].t {
 			return pairs[i].s < pairs[j].s
 		}
+
 		return pairs[i].t < pairs[j].t
 	})
 
@@ -147,14 +148,35 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		b.Fatalf("begin bench tx: %v", err)
 	}
 
-	start := time.Now()
+	shardedExecution := NewSharding(db, tokens...)
 
 	b.ResetTimer()
 
-	for i := range n {
-		_, _, err = txs[i].Process(writeTx)
-		if err != nil {
-			errCount++
+	go func() {
+		for i := range n {
+			txs[i].ProcessOnSharding(db, shardedExecution)
+		}
+
+		shardedExecution.Close()
+	}()
+
+	for _, w := range shardedExecution.pool {
+		for resp := range w.resCh {
+			if resp.err != nil {
+				errCount++
+
+				continue
+			}
+
+			err = writeTx.Put(accountsBucket, resp.senderKey, resp.senderValue.Bytes())
+			if err != nil {
+				errCount++
+			}
+
+			err = writeTx.Put(accountsBucket, resp.receiverKey, resp.receiverValue.Bytes())
+			if err != nil {
+				errCount++
+			}
 		}
 	}
 
@@ -166,11 +188,49 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 
 	b.StopTimer()
 
-	elapsed := time.Since(start)
-
-	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "tx/s")
+	b.ReportMetric(float64(n)/b.Elapsed().Seconds(), "tx/s")
 	b.ReportMetric(float64(errCount), "errors")
 	b.ReportMetric(float64(accountCount), "accounts")
 	b.ReportMetric(float64(tokenCount), "tokens")
 	b.ReportMetric(float64(n), "transactions")
+	b.ReportMetric(float64(b.N), "N")
+}
+
+// fanInRes merges many <-chan res into a single <-chan res.
+// It stops when all inputs are closed. Cancel ctx to stop early.
+func fanInRes(ctx context.Context, inputs ...<-chan res) <-chan res {
+	out := make(chan res, 1024) // a little buffering to smooth bursts
+
+	var wg sync.WaitGroup
+	wg.Add(len(inputs))
+
+	for _, ch := range inputs {
+		go func() {
+			defer wg.Done()
+
+			for {
+				select {
+				case v, ok := <-ch:
+					if !ok {
+						return
+					}
+
+					select {
+					case out <- v:
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
 }
