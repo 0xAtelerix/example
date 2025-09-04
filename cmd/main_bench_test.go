@@ -1,14 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/rand"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -16,6 +12,7 @@ import (
 	"time"
 
 	"github.com/0xAtelerix/sdk/gosdk"
+	fiberclient "github.com/gofiber/fiber/v3/client"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -25,22 +22,6 @@ import (
 )
 
 const accountsBucketName = "appaccounts"
-
-// ---- helpers ---------------------------------------------------------------
-
-func getFreePortTB(tb testing.TB) int {
-	tb.Helper()
-
-	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		tb.Fatalf("pick port: %v", err)
-	}
-
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-
-	return port
-}
 
 func waitUntil(ctx context.Context, f func() bool) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -63,8 +44,7 @@ func u256Bytes(v uint64) []byte { return uint256.NewInt(v).Bytes() }
 // ---- benchmark -------------------------------------------------------------
 
 func BenchmarkEndToEnd_RPC(b *testing.B) {
-	// --- ports & dirs
-	port := getFreePortTB(b)
+	// --- dirs
 	tmp := b.TempDir()
 	dbPath := filepath.Join(tmp, "appchain.mdbx")
 	localDB := filepath.Join(tmp, "local.mdbx")
@@ -156,7 +136,7 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 
 	os.Args = []string{
 		"bench-app",
-		"-rpc-port", fmt.Sprintf(":%d", port),
+		"-rpc-port", ":0",
 		"-emitter-port", ":0", // 0 → let OS choose, we don’t care in the test
 		"-db-path", dbPath,
 		"-local-db-path", localDB,
@@ -187,49 +167,33 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 
 	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/rpc", rpcPort)
 
-	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := waitUntil(readyCtx, func() bool {
-		req, err := http.NewRequestWithContext(readyCtx, http.MethodGet, rpcURL, nil)
-		if err != nil {
-			return false
-		}
+	// Fiber client (fasthttp-based), reuse across workers.
+	cli := fiberclient.New()
+	cli.SetJSONMarshal(json.Marshal)
+	cli.SetJSONUnmarshal(json.Unmarshal)
 
-		resp, err := http.DefaultClient.Do(req)
+	// --- readiness: just attempt a GET; any 2xx/4xx means listener is up.
+	if err := waitUntil(ctx, func() bool {
+		req := fiberclient.AcquireRequest().SetClient(cli)
+		defer fiberclient.ReleaseRequest(req)
+
+		resp, err := req.Get(rpcURL)
 		if err != nil {
 			return false
 		}
-		_ = resp.Body.Close()
+		// don't care about status/body here—only that the listener accepts connections
+		_ = resp // avoid unused
 
 		return true
 	}); err != nil {
-		readyCancel()
-		b.Fatalf("JSON-RPC service never became ready: %v", err)
+		b.Fatalf("service not ready: %v", err)
 	}
 
-	readyCancel()
-
-	// --- slam POST /rpc with b.N txs
+	// --- slam POST /rpc with b.N txs using Fiber client
 	var (
 		next uint64
 		errs int64
 	)
-
-	tr := &http.Transport{
-		// keep-alive pools
-		MaxIdleConns:        4096,
-		MaxIdleConnsPerHost: 4096,
-		MaxConnsPerHost:     512, // cap concurrent dials
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  true,
-		ForceAttemptHTTP2:   false, // plain HTTP/1.1
-	}
-	client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
-
-	b.Cleanup(func() { tr.CloseIdleConnections() })
-
-	const maxInFlight = 1024
-
-	sem := make(chan struct{}, maxInFlight)
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -239,50 +203,26 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 				return
 			}
 
-			sem <- struct{}{}
-
 			func() {
-				defer func() { <-sem }()
+				// Build & send request with Fiber client
+				req := fiberclient.AcquireRequest().SetClient(cli)
+				defer fiberclient.ReleaseRequest(req)
 
-				var buf bytes.Buffer
-				if err := json.NewEncoder(&buf).Encode(txs[i]); err != nil {
+				req.SetJSON(txs[i])
+
+				resp, err := req.Post(rpcURL)
+				if err != nil {
+					b.Log("err Post", err)
 					atomic.AddInt64(&errs, 1)
 
 					return
 				}
 
-				req, err := http.NewRequestWithContext(
-					ctx,
-					http.MethodPost,
-					rpcURL,
-					bytes.NewReader(buf.Bytes()),
-				)
-				if err != nil {
-					atomic.AddInt64(&errs, 1)
-
-					return
-				}
-
-				req.Header.Set("Content-Type", "application/json")
-
-				resp, err := client.Do(req)
-				if err != nil {
-					atomic.AddInt64(&errs, 1)
-
-					return
-				}
-
-				_, err = io.Copy(io.Discard, resp.Body)
-				if err != nil {
-					b.Log("discard response body errored", err)
-				}
-
-				err = resp.Body.Close()
-				if err != nil {
-					b.Log("close response body errored", err)
-				}
-
-				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				// If your handler returns a body you want to discard, you can read it:
+				// _ = resp.Body() // []byte
+				// We only check status here:
+				if sc := resp.StatusCode(); sc < 200 || sc >= 300 {
+					b.Log("err response:", resp)
 					atomic.AddInt64(&errs, 1)
 				}
 			}()

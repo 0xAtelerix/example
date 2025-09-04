@@ -14,8 +14,8 @@ import (
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
 	"github.com/goccy/go-json"
-	"github.com/gofiber/adaptor/v2"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
@@ -80,8 +80,14 @@ func RunCLI(ctx context.Context) {
 	Run(ctx, args, nil)
 }
 
+const shutdownGrace = 10 * time.Second
+
 func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	// Cancel on SIGINT/SIGTERM too (centralized; no per-runner signal goroutines needed)
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	config := gosdk.MakeAppchainConfig(ChainID)
 
@@ -104,6 +110,8 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		log.Fatal().Err(err).Msg("Failed to local mdbx database")
 	}
 
+	defer localDB.Close()
+
 	// инициализируем базу на нашей стороне
 	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(config.AppchainDBPath).
@@ -117,6 +125,8 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
+
+	defer appchainDB.Close()
 
 	txPool := txpool.NewTxPool[application.Transaction[application.Receipt]](
 		localDB,
@@ -148,17 +158,20 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 
 	if args.UseFiber {
 		runFiber(ctx, args, txPool, runErr, ready)
+
 		return
 	}
 	// else: keep your net/http path if you want both
 	runStdHTTP(ctx, args, txPool, runErr, ready)
 }
 
-func runStdHTTP(ctx context.Context, args RuntimeArgs, txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt], runErr chan error, ready chan<- int) {
-	// Catch system signals
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
+func runStdHTTP(
+	ctx context.Context,
+	args RuntimeArgs,
+	txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt],
+	runErr chan error,
+	ready chan<- int,
+) {
 	// Start JSON-RPC server in goroutine
 	mux := http.NewServeMux()
 	mux.Handle("/rpc", &api.RPCServer{Pool: txPool})
@@ -197,31 +210,44 @@ func runStdHTTP(ctx context.Context, args RuntimeArgs, txPool *txpool.TxPool[app
 		//nolint:contextcheck // shutdown, the context above is already expired
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
-		}
-	case sig := <-signalChan:
-		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
 
-		//nolint:contextcheck // shutdown, the context above is already expired
-		if err := server.Shutdown(context.Background()); err != nil {
-			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
+			_ = server.Close()
 		}
+
+		<-serveErr // drain
+
+	case err := <-serveErr:
+		// Server exited on its own
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal().Err(err).Msg("HTTP server crashed")
+		}
+
 	case err := <-runErr:
-		log.Error().Err(err).Msg("Appchain stopped with error")
+		if err != nil {
+			log.Error().Err(err).Msg("Appchain stopped with error")
+		}
 
 		//nolint:contextcheck // shutdown, the context above is already expired
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
 		}
+
+		<-serveErr
 	}
 }
 
-func runFiber(ctx context.Context, args RuntimeArgs, txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt], runErr chan error, ready chan<- int) {
+func runFiber(
+	ctx context.Context,
+	args RuntimeArgs,
+	txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt],
+	runErr chan error,
+	ready chan<- int,
+) {
 	// Use faster JSON codec (optional but recommended).
 	app := fiber.New(fiber.Config{
-		DisableStartupMessage: true,
-		ReadTimeout:           0, // we already limit at TCP layer/timeouts around listener
-		JSONEncoder:           json.Marshal,
-		JSONDecoder:           json.Unmarshal,
+		ReadTimeout: 0, // we already limit at TCP layer/timeouts around listener
+		JSONEncoder: json.Marshal,
+		JSONDecoder: json.Unmarshal,
 		// You can tune these if needed:
 		// Prefork:           true, // beware on macOS; better for Linux prod with SO_REUSEPORT
 		// ReduceMemoryUsage: true,
@@ -233,6 +259,7 @@ func runFiber(ctx context.Context, args RuntimeArgs, txPool *txpool.TxPool[appli
 
 	// Context-aware listener (satisfies `noctx` linter).
 	lc := &net.ListenConfig{}
+
 	ln, err := lc.Listen(ctx, "tcp", args.RPCPort) // ":0" allowed
 	if err != nil {
 		log.Fatal().Err(err).Msg("listen rpc")
@@ -245,28 +272,29 @@ func runFiber(ctx context.Context, args RuntimeArgs, txPool *txpool.TxPool[appli
 		} else {
 			ready <- 0
 		}
+
 		close(ready)
 	}
 
 	// Serve in background; Fiber provides Listener().
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- app.Listener(ln) }()
 
-	// Tie shutdown to ctx with a grace period.
-	const grace = 10 * time.Second
+	go func() { serveErr <- app.Listener(ln) }()
 
 	select {
 	case <-ctx.Done():
 		// Start graceful shutdown.
 		shutdownCh := make(chan struct{})
+
 		go func() {
 			_ = app.Shutdown()
+
 			close(shutdownCh)
 		}()
 
 		select {
 		case <-shutdownCh:
-		case <-time.After(grace):
+		case <-time.After(shutdownGrace):
 			// Force-close listener if needed (rare).
 			_ = ln.Close()
 		}
