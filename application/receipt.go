@@ -2,12 +2,12 @@ package application
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/holiman/uint256"
 )
 
+//nolint:errname // Receipt is not an error type, it just implements Error() method for interface compliance
 type Receipt struct {
 	Sender          string       `json:"sender"`
 	SenderBalance   *uint256.Int `json:"sender_balance"`
@@ -26,12 +26,4 @@ func (Receipt) Status() apptypes.TxReceiptStatus {
 
 func (Receipt) Error() string {
 	return ""
-}
-
-func (r *Receipt) Unmarshal(data []byte) error {
-	return json.Unmarshal(data, r)
-}
-
-func (r Receipt) Marshal() (data []byte, err error) {
-	return json.Marshal(r)
 }
