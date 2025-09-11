@@ -3,7 +3,7 @@ module github.com/0xAtelerix/example
 go 1.25.0
 
 require (
-	github.com/0xAtelerix/sdk v0.1.1-0.20250904095327-0a167eb5586c
+	github.com/0xAtelerix/sdk v0.1.1-0.20250909053642-47eece191de9
 	github.com/davecgh/go-spew v1.1.1
 	github.com/goccy/go-json v0.10.5
 	github.com/gofiber/fiber/v3 v3.0.0-rc.1
