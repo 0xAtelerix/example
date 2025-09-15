@@ -19,7 +19,7 @@ services:
       - --rpc-port=:8080
 
   consensusnode:
-    image: b00ris/consensusnode:latest
+    image: pelagosnetwork/consensusnode:latest
     volumes:
       - ./test_consenus:/test_consenus  # 👈 По умолчанию read-write
     command:

@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xAtelerix/example"
+	"github.com/stretchr/testify/require"
+
+	"github.com/0xAtelerix/example/application"
 )
 
 // TestEndToEnd spins up main(), posts a transaction to the /rpc endpoint and
@@ -30,7 +32,9 @@ func TestEndToEnd(t *testing.T) {
 
 	// craft os.Args for main()
 	oldArgs := os.Args
+
 	defer func() { os.Args = oldArgs }()
+
 	os.Args = []string{
 		"appchain-test-binary",
 		"-rpc-port", fmt.Sprintf(":%d", port),
@@ -41,29 +45,35 @@ func TestEndToEnd(t *testing.T) {
 		"-tx-dir", txDir,
 	}
 
-	go main() // NB: main() never returns except on fatal, so run in goroutine
+	go RunCLI(t.Context())
 
 	// wait until HTTP service is up
 	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/rpc", port)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := waitUntil(ctx, func() bool {
-		resp, err := http.Get(rpcURL) // GET is fine; we only care the port is bound.
-		if err != nil {
-			return false
-		}
+		// GET is fine; we only care the port is bound.
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rpcURL, nil)
+		require.NoError(t, err, "GET req /rpc")
 
-		resp.Body.Close()
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err, "GET res /rpc")
+
+		err = resp.Body.Close()
+		require.NoError(t, err)
+
 		return true
 	}); err != nil {
 		t.Fatalf("JSON-RPC service never became ready: %v", err)
 	}
 
 	// build & send a transaction
-	tx := example.ExampleTransaction{
+	tx := application.Transaction[application.Receipt]{
 		Sender: "Vasya",
 		Value:  42,
+		TxHash: "deadbeef",
 	}
 
 	var buf bytes.Buffer
@@ -71,12 +81,22 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("encode tx: %v", err)
 	}
 
-	resp, err := http.Post(rpcURL, "application/json", &buf)
-	if err != nil {
-		t.Fatalf("POST /rpc: %v", err)
-	}
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		rpcURL,
+		bytes.NewReader(buf.Bytes()),
+	)
+	require.NoError(t, err, "POST req /rpc")
 
-	defer resp.Body.Close()
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err, "POST res /rpc")
+
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		t.Fatalf("unexpected HTTP status: %s", resp.Status)
@@ -95,8 +115,11 @@ func TestEndToEnd(t *testing.T) {
 	t.Log("Success!")
 }
 
+// not safe to use in concurrent env
 func getFreePort(t *testing.T) int {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	t.Helper()
+
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("pick port: %v", err)
 	}
@@ -109,22 +132,4 @@ func getFreePort(t *testing.T) int {
 	}
 
 	return port
-}
-
-// waitUntil serves as a tiny helper that polls f() until it returns true or ctx
-// expires.
-func waitUntil(ctx context.Context, f func() bool) error {
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if f() {
-				return nil
-			}
-		}
-	}
 }
