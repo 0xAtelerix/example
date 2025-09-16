@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xAtelerix/sdk/gosdk"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	mdbxlog "github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/0xAtelerix/example/application"
@@ -21,6 +25,8 @@ import (
 // TestEndToEnd spins up main(), posts a transaction to the /rpc endpoint and
 // verifies we get a 2xx response.
 func TestEndToEnd(t *testing.T) {
+	var err error
+
 	port := getFreePort(t)
 
 	// temp dirs for clean DB state
@@ -29,6 +35,10 @@ func TestEndToEnd(t *testing.T) {
 	localDB := filepath.Join(tmp, "local.mdbx")
 	streamDir := filepath.Join(tmp, "stream")
 	txDir := filepath.Join(tmp, "tx")
+
+	// Create an empty MDBX database that can be opened in readonly mode
+	err = createEmptyMDBXDatabase(txDir)
+	require.NoError(t, err, "create empty txBatch database")
 
 	// craft os.Args for main()
 	oldArgs := os.Args
@@ -53,12 +63,14 @@ func TestEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := waitUntil(ctx, func() bool {
+	if err = waitUntil(ctx, func() bool {
 		// GET is fine; we only care the port is bound.
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rpcURL, nil)
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, rpcURL, nil)
 		require.NoError(t, err, "GET req /rpc")
 
-		resp, err := http.DefaultClient.Do(req)
+		var resp *http.Response
+		resp, err = http.DefaultClient.Do(req)
 		require.NoError(t, err, "GET res /rpc")
 
 		err = resp.Body.Close()
@@ -77,7 +89,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(tx); err != nil {
+	if err = json.NewEncoder(&buf).Encode(tx); err != nil {
 		t.Fatalf("encode tx: %v", err)
 	}
 
@@ -132,4 +144,22 @@ func getFreePort(t *testing.T) int {
 	}
 
 	return port
+}
+
+// createEmptyMDBXDatabase creates an empty MDBX database that can be opened in readonly mode
+func createEmptyMDBXDatabase(dbPath string) error {
+	tempDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(dbPath).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return gosdk.TxBucketsTables()
+		}).
+		Open()
+	if err != nil {
+		return err
+	}
+
+	// Close immediately - we just needed to create the database files
+	tempDB.Close()
+
+	return nil
 }
