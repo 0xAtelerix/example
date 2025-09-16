@@ -120,8 +120,7 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 				gosdk.DefaultTables(),
 				application.Tables(),
 			)
-		}).
-		Open()
+		}).Open()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
 	}
@@ -132,6 +131,16 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		localDB,
 	)
 
+	txBatchDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(config.TxStreamDir).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return gosdk.TxBucketsTables()
+		}).
+		Readonly().Open()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to tx batch mdbx database")
+	}
+
 	log.Info().Msg("Starting appchain...")
 
 	appchainExample, err := gosdk.NewAppchain(
@@ -139,7 +148,8 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		application.BlockConstructor,
 		txPool,
 		config,
-		appchainDB)
+		appchainDB,
+		txBatchDB)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to start appchain")
 	}
