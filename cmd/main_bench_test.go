@@ -19,6 +19,8 @@ import (
 	mdbxlog "github.com/ledgerwatch/log/v3"
 
 	"github.com/0xAtelerix/example/application"
+	db2 "github.com/0xAtelerix/example/application/db"
+	"github.com/0xAtelerix/example/application/transactions"
 )
 
 const accountsBucketName = "appaccounts"
@@ -77,14 +79,14 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 	required := make(map[stKey]struct{}, b.N)
 
 	// Prebuild tx payloads so the hot path avoids RNG/alloc where possible.
-	txs := make([]application.Transaction[application.Receipt], b.N)
+	txs := make([]transactions.Transaction[transactions.Receipt], b.N)
 	for i := range b.N {
 		si := r.Intn(accountCount)
 		ri := r.Intn(accountCount)
 		ti := r.Intn(tokenCount)
 		val := uint64(r.Intn(maxValue/100) + 1)
 
-		txs[i] = application.Transaction[application.Receipt]{
+		txs[i] = transactions.Transaction[transactions.Receipt]{
 			Sender:   accounts[si],
 			Receiver: accounts[ri],
 			Token:    tokens[ti],
@@ -99,7 +101,7 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 		db, err := mdbx.NewMDBX(mdbxlog.New()).
 			Path(dbPath).
 			WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-				return gosdk.MergeTables(gosdk.DefaultTables(), application.Tables())
+				return gosdk.MergeTables(gosdk.DefaultTables(), db2.Tables())
 			}).
 			Open()
 		if err != nil {
@@ -114,7 +116,7 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 
 		// generous balance so all txs should pass at the state layer
 		for st := range required {
-			if err := seedTx.Put(accountsBucketName, application.AccountKey(st.s, st.t), u256Bytes(uint64(maxValue))); err != nil {
+			if err := seedTx.Put(accountsBucketName, db2.AccountKey(st.s, st.t), u256Bytes(uint64(maxValue))); err != nil {
 				seedTx.Rollback()
 				db.Close()
 				b.Fatalf("seed Put: %v", err)
@@ -149,7 +151,7 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go Run(ctx, RuntimeArgs{
+	go application.Run(ctx, application.RuntimeArgs{
 		RPCPort:        ":0",
 		EmitterPort:    ":0",
 		AppchainDBPath: dbPath,
@@ -157,7 +159,7 @@ func BenchmarkEndToEnd_RPC(b *testing.B) {
 		EventStreamDir: streamDir,
 		TxStreamDir:    txDir,
 		UseFiber:       true,
-	}, ready)
+	}, ChainID, ready)
 
 	rpcPort := <-ready
 	if rpcPort == 0 {

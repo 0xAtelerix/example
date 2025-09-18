@@ -1,15 +1,15 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/goccy/go-json"
 
-	"github.com/0xAtelerix/example/application"
+	"github.com/0xAtelerix/example/application/transactions"
 )
 
 // JSON-RPC request
@@ -30,7 +30,7 @@ type RPCResponse struct {
 
 // RPCServer - обработчик JSON-RPC
 type RPCServer struct {
-	Pool apptypes.TxPoolInterface[application.Transaction[application.Receipt], application.Receipt]
+	Pool apptypes.TxPoolInterface[transactions.Transaction[transactions.Receipt], transactions.Receipt]
 }
 
 // todo: add context
@@ -87,7 +87,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var txHash [32]byte
 			copy(txHash[:], txReq.Hash)
 
-			var tx application.Transaction[application.Receipt]
+			var tx transactions.Transaction[transactions.Receipt]
 
 			tx, err = s.Pool.GetTransaction(r.Context(), txHash[:])
 			if err != nil {
@@ -131,7 +131,7 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 const SendTransactionMethod = "SendTransaction"
 
 type SendTransactionRequest struct {
-	Transaction application.Transaction[application.Receipt] `json:"transaction"`
+	Transaction transactions.Transaction[transactions.Receipt] `json:"transaction"`
 }
 
 const GetTransactionByHashMethod = "GetTransactionByHash"

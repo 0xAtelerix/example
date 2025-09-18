@@ -6,6 +6,14 @@ run:
                                         -local-db-path=./test_tmp \
                                         -stream-dir=./test_consenus/snapshot.data \
                                         -rpc-port=:8080
+
+run-local:
+	GOWORK=off GOPRIVATE=github.com/0xAtelerix/* go run cmd/main.go \
+                                        -emitter-port=:50051 \
+                                        -db-path=./test \
+                                        -local-db-path=./test_tmp \
+                                        -stream-dir=./test_consenus/snapshot.data \
+                                        -rpc-port=:8080
 get:
 	GOPRIVATE=github.com/0xAtelerix/* go mod download github.com/0xAtelerix/sdk/gosdk
 
@@ -17,27 +25,27 @@ env:
 dockerrun:
 	docker run --rm \
 	  -v $(PWD)/test_consenus:/test_consenus \
-	  b00ris/consensusnode:latest \
+	  pelagosnetwork/consensusnode:latest \
 	  --snapshot-dir=/test_consenus \
 	  --appchain=1=host.docker.internal:50051
 
 dockerbuild:
 	DOCKER_BUILDKIT=1 docker build --ssh default -t abc/appchain:latest .
 
-## Полный запуск: сборка и запуск контейнеров
+## full restart
 up: build
 	@echo "🔼 Starting containers..."
 	docker compose up
 
-## Сборка с SSH-ключом
+## build with an ssh key
 build:
 	DOCKER_BUILDKIT=1 docker compose build --ssh default
 
-## Остановить и удалить
+## Shutdown
 down:
 	docker compose down
 
-## Перезапуск
+## Restart
 restart: down up
 
 clean:
@@ -49,7 +57,13 @@ tidy:
 tests:
 	go test -short -timeout 20m -failfast -shuffle=on -v ./... $(params)
 
+tests-local:
+	GOWORK=off go test -short -timeout 20m -failfast -shuffle=on -v ./... $(params)
+
 race-tests:
+	go test -race -short -timeout 30m -failfast -shuffle=on -v ./... $(params)
+
+local-race-tests:
 	go test -race -short -timeout 30m -failfast -shuffle=on -v ./... $(params)
 
 VERSION=v2.4.0
@@ -71,3 +85,6 @@ deps-ci:
 
 lints:
 	$$(go env GOPATH)/bin/golangci-lint run ./... -v --timeout 10m
+
+lints-local:
+	GOWORK=off $$(go env GOPATH)/bin/golangci-lint run ./... -v --timeout 10m

@@ -7,6 +7,7 @@ WORKDIR /app
 # GOPRIVATE — если есть приватные импорты
 ENV GOPRIVATE=github.com/0xAtelerix/*
 ENV CGO_ENABLED=1
+#ENV GOWORK=off
 
 # Trust GitHub
 RUN git config --global url."git@github.com:".insteadOf "https://github.com/"

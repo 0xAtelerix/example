@@ -1,9 +1,10 @@
 package application
 
 import (
-	"encoding/json"
-
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
+	"github.com/goccy/go-json"
+
+	"github.com/0xAtelerix/example/application/transactions"
 )
 
 // step 3:
@@ -42,7 +43,7 @@ func BlockConstructor(
 	blockNumber uint64, // blockNumber
 	stateRoot [32]byte, // stateRoot
 	_ [32]byte, // previousBlockHash
-	_ apptypes.Batch[Transaction[Receipt], Receipt], // txsBatch
+	_ apptypes.Batch[transactions.Transaction[transactions.Receipt], transactions.Receipt], // txsBatch
 ) *Block {
 	return &Block{
 		BlockNum: blockNumber,

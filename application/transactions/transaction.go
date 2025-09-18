@@ -1,8 +1,7 @@
-package application
+package transactions
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"sync"
@@ -10,6 +9,8 @@ import (
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
+	db2 "github.com/0xAtelerix/example/application/db"
 )
 
 // appchain implementation
@@ -25,14 +26,6 @@ type Transaction[R Receipt] struct {
 	TxHash   string `json:"hash"`
 }
 
-func (e *Transaction[R]) Unmarshal(b []byte) error {
-	return json.Unmarshal(b, e)
-}
-
-func (e Transaction[R]) Marshal() ([]byte, error) {
-	return json.Marshal(e)
-}
-
 func (e Transaction[R]) Hash() [32]byte {
 	var h [32]byte
 	copy(h[:], e.TxHash)
@@ -41,16 +34,16 @@ func (e Transaction[R]) Hash() [32]byte {
 }
 
 type Sharding struct {
-	pool map[string]*Worker // Token
+	Pool map[string]*Worker // Token
 	mu   sync.RWMutex
 }
 
 func NewSharding(db kv.RwDB, tokens ...string) *Sharding {
 	s := &Sharding{
-		pool: make(map[string]*Worker),
+		Pool: make(map[string]*Worker),
 	}
 
-	s.pool = make(map[string]*Worker, len(tokens))
+	s.Pool = make(map[string]*Worker, len(tokens))
 
 	startChs := make([]chan struct{}, 0, len(tokens))
 
@@ -61,7 +54,7 @@ func NewSharding(db kv.RwDB, tokens ...string) *Sharding {
 			startCh := make(chan struct{})
 			startChs = append(startChs, startCh)
 
-			s.pool[token] = w
+			s.Pool[token] = w
 
 			go w.Run(db, startCh)
 		}
@@ -77,7 +70,7 @@ func NewSharding(db kv.RwDB, tokens ...string) *Sharding {
 func (s *Sharding) AddToken(token string) (*Worker, bool) {
 	s.mu.RLock()
 
-	if w, ok := s.pool[token]; ok {
+	if w, ok := s.Pool[token]; ok {
 		s.mu.RUnlock()
 
 		return w, false
@@ -91,69 +84,69 @@ func (s *Sharding) AddToken(token string) (*Worker, bool) {
 	return s.addToken(token)
 }
 
-func (s *Sharding) Task(r req, db kv.RwDB) {
+func (s *Sharding) Task(r Req, db kv.RwDB) {
 	w, isNew := s.AddToken(r.token)
 	if isNew {
 		go w.Run(db)
 	}
 
-	w.reqCh <- r
+	w.ReqCh <- r
 }
 
 func (s *Sharding) Close() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, worker := range s.pool {
-		close(worker.reqCh)
+	for _, worker := range s.Pool {
+		close(worker.ReqCh)
 	}
 }
 
 func (s *Sharding) addToken(token string) (*Worker, bool) {
-	if w, ok := s.pool[token]; ok {
+	if w, ok := s.Pool[token]; ok {
 		return w, false
 	}
 
-	reqCh := make(chan req, 100000)
-	resCh := make(chan res, 100000)
+	reqCh := make(chan Req, 100000)
+	resCh := make(chan Res, 100000)
 	w := &Worker{
-		reqCh: reqCh,
-		resCh: resCh,
+		ReqCh: reqCh,
+		ResCh: resCh,
 	}
 
-	s.pool[token] = w
+	s.Pool[token] = w
 
 	return w, true
 }
 
-type req struct {
+type Req struct {
 	token       string
-	senderKey   []byte
-	receiverKey []byte
+	SenderKey   []byte
+	ReceiverKey []byte
 	value       uint64
 	roTx        kv.Tx
 }
 
-type res struct {
-	senderValue   *uint256.Int
-	senderKey     []byte
-	receiverValue *uint256.Int
-	receiverKey   []byte
-	err           error
+type Res struct {
+	SenderValue   *uint256.Int
+	SenderKey     []byte
+	ReceiverValue *uint256.Int
+	ReceiverKey   []byte
+	Err           error
 }
 
 type WorkerManager struct {
-	reqCh  chan req
-	worker *Worker
+	ReqCh  chan Req
+	Worker *Worker
 }
 
 type Worker struct {
-	reqCh chan req
-	resCh chan res
+	ReqCh chan Req
+	ResCh chan Res
 }
 
 func (w *Worker) Run(db kv.RwDB, startCh ...chan struct{}) {
-	var r req
+	var r Req
 
 	if len(startCh) > 0 {
 		startCh[0] <- struct{}{}
@@ -164,27 +157,27 @@ func (w *Worker) Run(db kv.RwDB, startCh ...chan struct{}) {
 
 	roTx, err := db.BeginRo(context.Background())
 	if err != nil {
-		w.resCh <- res{err: err}
+		w.ResCh <- Res{Err: err}
 
 		return
 	}
 
 	defer roTx.Rollback()
 
-	for r = range w.reqCh {
-		senderBalanceData, err := roTx.GetOne(accountsBucket, r.senderKey)
+	for r = range w.ReqCh {
+		senderBalanceData, err := roTx.GetOne(db2.AccountsBucket, r.SenderKey)
 		if err != nil {
-			w.resCh <- res{err: err}
+			w.ResCh <- Res{Err: err}
 
 			continue
 		}
 
 		if len(senderBalanceData) == 0 {
-			w.resCh <- res{
-				err: fmt.Errorf(
+			w.ResCh <- Res{
+				Err: fmt.Errorf(
 					"%w: sender %s, token %s, actual balance %d, value %d",
 					ErrNotEnoughBalance,
-					r.senderKey,
+					r.SenderKey,
 					r.token,
 					0,
 					r.value,
@@ -198,11 +191,11 @@ func (w *Worker) Run(db kv.RwDB, startCh ...chan struct{}) {
 		senderBalance.SetBytes(senderBalanceData)
 
 		if senderBalance.CmpUint64(r.value) < 0 {
-			w.resCh <- res{
-				err: fmt.Errorf(
+			w.ResCh <- Res{
+				Err: fmt.Errorf(
 					"%w: sender %s, token %s, actual balance %d, value %d",
 					ErrNotEnoughBalance,
-					r.senderKey,
+					r.SenderKey,
 					r.token,
 					senderBalance,
 					r.value,
@@ -214,9 +207,9 @@ func (w *Worker) Run(db kv.RwDB, startCh ...chan struct{}) {
 
 		var receiverBalanceData []byte
 
-		receiverBalanceData, err = roTx.GetOne(accountsBucket, r.receiverKey)
+		receiverBalanceData, err = roTx.GetOne(db2.AccountsBucket, r.ReceiverKey)
 		if err != nil {
-			w.resCh <- res{err: err}
+			w.ResCh <- Res{Err: err}
 
 			continue
 		}
@@ -231,15 +224,15 @@ func (w *Worker) Run(db kv.RwDB, startCh ...chan struct{}) {
 		receiverBalance.Add(receiverBalance, amount)
 		senderBalance.Sub(senderBalance, amount)
 
-		w.resCh <- res{
-			senderValue:   senderBalance,
-			senderKey:     r.senderKey,
-			receiverValue: receiverBalance,
-			receiverKey:   r.receiverKey,
+		w.ResCh <- Res{
+			SenderValue:   senderBalance,
+			SenderKey:     r.SenderKey,
+			ReceiverValue: receiverBalance,
+			ReceiverKey:   r.ReceiverKey,
 		}
 	}
 
-	close(w.resCh)
+	close(w.ResCh)
 }
 
 func (e Transaction[R]) Process(
@@ -248,9 +241,9 @@ func (e Transaction[R]) Process(
 	// get sender's balance
 	var senderBalanceData []byte
 
-	senderTokenKey := AccountKey(e.Sender, e.Token)
+	senderTokenKey := db2.AccountKey(e.Sender, e.Token)
 
-	senderBalanceData, err = dbTx.GetOne(accountsBucket, senderTokenKey)
+	senderBalanceData, err = dbTx.GetOne(db2.AccountsBucket, senderTokenKey)
 	if err != nil {
 		return res, txs, err
 	}
@@ -282,9 +275,9 @@ func (e Transaction[R]) Process(
 
 	var receiverBalanceData []byte
 
-	receiverTokenKey := AccountKey(e.Receiver, e.Token)
+	receiverTokenKey := db2.AccountKey(e.Receiver, e.Token)
 
-	receiverBalanceData, err = dbTx.GetOne(accountsBucket, receiverTokenKey)
+	receiverBalanceData, err = dbTx.GetOne(db2.AccountsBucket, receiverTokenKey)
 	if err != nil {
 		return res, txs, err
 	}
@@ -299,12 +292,12 @@ func (e Transaction[R]) Process(
 	receiverBalance.Add(receiverBalance, amount)
 	senderBalance.Sub(senderBalance, amount)
 
-	err = dbTx.Put(accountsBucket, senderTokenKey, senderBalance.Bytes())
+	err = dbTx.Put(db2.AccountsBucket, senderTokenKey, senderBalance.Bytes())
 	if err != nil {
 		return R{}, nil, fmt.Errorf("can't store sender's balance %w", err)
 	}
 
-	err = dbTx.Put(accountsBucket, receiverTokenKey, receiverBalance.Bytes())
+	err = dbTx.Put(db2.AccountsBucket, receiverTokenKey, receiverBalance.Bytes())
 	if err != nil {
 		return R{}, nil, fmt.Errorf("can't store receiver's balance %w", err)
 	}
@@ -321,43 +314,10 @@ func (e Transaction[R]) Process(
 }
 
 func (e *Transaction[R]) ProcessOnSharding(db kv.RwDB, shardedApp *Sharding) {
-	shardedApp.Task(req{
+	shardedApp.Task(Req{
 		token:       e.Token,
-		senderKey:   GetAccountKey(e.Sender, e.Token),
-		receiverKey: GetAccountKey(e.Receiver, e.Token),
+		SenderKey:   db2.GetAccountKey(e.Sender, e.Token),
+		ReceiverKey: db2.GetAccountKey(e.Receiver, e.Token),
 		value:       e.Value,
 	}, db)
-}
-
-const (
-	accountsBucket = "appaccounts" // token+account -> value
-)
-
-func Tables() kv.TableCfg {
-	return kv.TableCfg{
-		accountsBucket: {},
-	}
-}
-
-func AccountKey(sender string, token string) []byte {
-	return []byte(token + sender)
-}
-
-//nolint:gochecknoglobals //only for sharding testing
-var accs = make(map[string]map[string][]byte)
-
-func GetAccountKey(sender string, token string) []byte {
-	acc, ok := accs[sender]
-	if !ok {
-		acc = make(map[string][]byte)
-		accs[sender] = acc
-	}
-
-	t, ok := acc[token]
-	if !ok {
-		t = AccountKey(sender, token)
-		acc[token] = t
-	}
-
-	return t
 }

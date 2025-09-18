@@ -19,7 +19,7 @@ import (
 	mdbxlog "github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/0xAtelerix/example/application"
+	"github.com/0xAtelerix/example/application/transactions"
 )
 
 // TestEndToEnd spins up main(), posts a transaction to the /rpc endpoint and
@@ -82,7 +82,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	// build & send a transaction
-	tx := application.Transaction[application.Receipt]{
+	tx := transactions.Transaction[transactions.Receipt]{
 		Sender: "Vasya",
 		Value:  42,
 		TxHash: "deadbeef",

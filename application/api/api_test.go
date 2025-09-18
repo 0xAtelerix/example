@@ -1,16 +1,16 @@
 package api
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
+	"github.com/goccy/go-json"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/0xAtelerix/example/application"
+	"github.com/0xAtelerix/example/application/transactions"
 )
 
 func TestTxPool(t *testing.T) {
@@ -22,7 +22,7 @@ func TestTxPool(t *testing.T) {
 		Open()
 	require.NoError(t, err)
 
-	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
+	txPool := txpool.NewTxPool[transactions.Transaction[transactions.Receipt], transactions.Receipt](
 		localDB,
 	)
 
@@ -50,7 +50,7 @@ func TestTxPool(t *testing.T) {
 
 	txHash := txReqAdd.Transaction.Hash()
 
-	var txFromGet application.Transaction[application.Receipt]
+	var txFromGet transactions.Transaction[transactions.Receipt]
 
 	txFromGet, err = txPool.GetTransaction(t.Context(), txHash[:])
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestTxPool(t *testing.T) {
 
 	var (
 		txReqGet GetTransactionByHashRequest
-		gotTx    application.Transaction[application.Receipt]
+		gotTx    transactions.Transaction[transactions.Receipt]
 	)
 
 	err = json.Unmarshal(reqGet.Params, &txReqGet)

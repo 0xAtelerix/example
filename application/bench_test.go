@@ -14,10 +14,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
+
+	db2 "github.com/0xAtelerix/example/application/db"
+	"github.com/0xAtelerix/example/application/transactions"
 )
 
 // For brevity:
-type Tx = Transaction[Receipt]
+type Tx = transactions.Transaction[transactions.Receipt]
 
 // utility: stable RNG for reproducible benches
 func newRand() *rand.Rand { return rand.New(rand.NewSource(1)) }
@@ -36,7 +39,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return gosdk.MergeTables(
 				gosdk.DefaultTables(),
-				Tables(),
+				db2.Tables(),
 			)
 		}).
 		Open()
@@ -98,7 +101,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 			Value:    val,
 		}
 
-		GetAccountKey(txs[i].Sender, txs[i].Token) // warm-up cache
+		db2.GetAccountKey(txs[i].Sender, txs[i].Token) // warm-up cache
 
 		requiredSenderPairs[stKey{accounts[si], tokens[ti]}] = struct{}{}
 	}
@@ -129,7 +132,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 
 	for _, st := range pairs {
 		// Give every sender-token a healthy starting balance so all txs succeed.
-		if err = seedTx.Append(accountsBucket, AccountKey(st.s, st.t), u256Bytes(uint64(maxValue))); err != nil {
+		if err = seedTx.Append(db2.AccountsBucket, db2.AccountKey(st.s, st.t), u256Bytes(uint64(maxValue))); err != nil {
 			seedTx.Rollback()
 			b.Fatalf("seed Put: %v", err)
 		}
@@ -148,7 +151,7 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		b.Fatalf("begin bench tx: %v", err)
 	}
 
-	shardedExecution := NewSharding(db, tokens...)
+	shardedExecution := transactions.NewSharding(db, tokens...)
 
 	b.ResetTimer()
 
@@ -160,20 +163,20 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 		shardedExecution.Close()
 	}()
 
-	for _, w := range shardedExecution.pool {
-		for resp := range w.resCh {
-			if resp.err != nil {
+	for _, w := range shardedExecution.Pool {
+		for resp := range w.ResCh {
+			if resp.Err != nil {
 				errCount++
 
 				continue
 			}
 
-			err = writeTx.Put(accountsBucket, resp.senderKey, resp.senderValue.Bytes())
+			err = writeTx.Put(db2.AccountsBucket, resp.SenderKey, resp.SenderValue.Bytes())
 			if err != nil {
 				errCount++
 			}
 
-			err = writeTx.Put(accountsBucket, resp.receiverKey, resp.receiverValue.Bytes())
+			err = writeTx.Put(db2.AccountsBucket, resp.ReceiverKey, resp.ReceiverValue.Bytes())
 			if err != nil {
 				errCount++
 			}
@@ -198,8 +201,8 @@ func BenchmarkProcess_MDBX(b *testing.B) {
 
 // fanInRes merges many <-chan res into a single <-chan res.
 // It stops when all inputs are closed. Cancel ctx to stop early.
-func fanInRes(ctx context.Context, inputs ...<-chan res) <-chan res {
-	out := make(chan res, 1024) // a little buffering to smooth bursts
+func fanInRes(ctx context.Context, inputs ...<-chan transactions.Res) <-chan transactions.Res {
+	out := make(chan transactions.Res, 1024) // a little buffering to smooth bursts
 
 	var wg sync.WaitGroup
 	wg.Add(len(inputs))

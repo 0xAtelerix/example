@@ -1,4 +1,4 @@
-package application
+package transactions
 
 import (
 	"crypto/sha256"
