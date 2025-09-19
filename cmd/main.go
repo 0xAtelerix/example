@@ -92,7 +92,7 @@ func RunCLI(ctx context.Context) {
 const shutdownGrace = 10 * time.Second
 
 func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(zerolog.DebugLevel)
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(args.LogLevel)
 
 	// Cancel on SIGINT/SIGTERM too (centralized; no per-runner signal goroutines needed)
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
