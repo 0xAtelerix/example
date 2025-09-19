@@ -38,6 +38,7 @@ type RuntimeArgs struct {
 	SolBlocksPath      string
 	RPCPort            string
 	UseFiber           bool
+	LogLevel           zerolog.Level
 }
 
 func main() {
@@ -63,6 +64,7 @@ func RunCLI(ctx context.Context) {
 	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
 	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
+	logLevel := fs.Uint("log-level", uint(zerolog.DebugLevel), "Logging level")
 
 	_ = fs.Parse(os.Args[1:])
 
@@ -75,6 +77,7 @@ func RunCLI(ctx context.Context) {
 		EthereumBlocksPath: *ethereumBlocksPath,
 		SolBlocksPath:      *solBlocksPath,
 		RPCPort:            *rpcPort,
+		LogLevel:           zerolog.Level(*logLevel),
 	}
 
 	Run(ctx, args, nil)
@@ -83,11 +86,13 @@ func RunCLI(ctx context.Context) {
 const shutdownGrace = 10 * time.Second
 
 func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(zerolog.DebugLevel)
 
 	// Cancel on SIGINT/SIGTERM too (centralized; no per-runner signal goroutines needed)
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	ctx = log.Logger.WithContext(ctx)
 
 	config := gosdk.MakeAppchainConfig(ChainID)
 
