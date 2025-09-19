@@ -64,7 +64,13 @@ func RunCLI(ctx context.Context) {
 	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
 	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
-	logLevel := fs.Uint("log-level", uint(zerolog.DebugLevel), "Logging level")
+	logLevel := fs.Int("log-level", int(zerolog.DebugLevel), "Logging level")
+
+	if *logLevel > int(zerolog.Disabled) {
+		*logLevel = int(zerolog.DebugLevel)
+	} else if *logLevel < int(zerolog.TraceLevel) {
+		*logLevel = int(zerolog.TraceLevel)
+	}
 
 	_ = fs.Parse(os.Args[1:])
 
