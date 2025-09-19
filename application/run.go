@@ -38,14 +38,21 @@ type RuntimeArgs struct {
 	SolBlocksPath      string
 	RPCPort            string
 	UseFiber           bool
+	LogLevel           zerolog.Level
 }
 
 func Run(ctx context.Context, args RuntimeArgs, chainID uint64, ready chan<- int) {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).
+		Level(args.LogLevel)
 
 	// Cancel on SIGINT/SIGTERM too (centralized; no per-runner signal goroutines needed)
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	ctx = log.Logger.WithContext(ctx)
+
+	zerolog.SetGlobalLevel(args.LogLevel)
+	zerolog.DefaultContextLogger = log.Ctx(ctx)
 
 	config := gosdk.MakeAppchainConfig(chainID, nil)
 
