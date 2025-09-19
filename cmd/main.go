@@ -23,12 +23,16 @@ import (
 const ChainID = 42
 
 type RuntimeArgs struct {
-	EmitterPort    string
-	AppchainDBPath string
-	EventStreamDir string
-	TxStreamDir    string
-	LocalDBPath    string
-	RPCPort        string
+	EmitterPort        string
+	AppchainDBPath     string
+	EventStreamDir     string
+	TxStreamDir        string
+	LocalDBPath        string
+	EthereumBlocksPath string
+	SolBlocksPath      string
+	RPCPort            string
+	UseFiber           bool
+	LogLevel           zerolog.Level
 }
 
 func main() {
@@ -51,17 +55,29 @@ func RunCLI(ctx context.Context) {
 	txDir := fs.String("tx-dir", config.TxStreamDir, "Transaction stream directory")
 
 	localDBPath := fs.String("local-db-path", "./localdb", "Path to local DB")
+	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
+	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
+	logLevel := fs.Int("log-level", int(zerolog.DebugLevel), "Logging level")
+
+	if *logLevel > int(zerolog.Disabled) {
+		*logLevel = int(zerolog.DebugLevel)
+	} else if *logLevel < int(zerolog.TraceLevel) {
+		*logLevel = int(zerolog.TraceLevel)
+	}
 
 	_ = fs.Parse(os.Args[1:])
 
 	args := RuntimeArgs{
-		EmitterPort:    *emitterPort,
-		AppchainDBPath: *appchainDBPath,
-		EventStreamDir: *streamDir,
-		TxStreamDir:    *txDir,
-		LocalDBPath:    *localDBPath,
-		RPCPort:        *rpcPort,
+		EmitterPort:        *emitterPort,
+		AppchainDBPath:     *appchainDBPath,
+		EventStreamDir:     *streamDir,
+		TxStreamDir:        *txDir,
+		LocalDBPath:        *localDBPath,
+		EthereumBlocksPath: *ethereumBlocksPath,
+		SolBlocksPath:      *solBlocksPath,
+		RPCPort:            *rpcPort,
+		LogLevel:           zerolog.Level(*logLevel),
 	}
 
 	Run(ctx, args, nil)
@@ -70,11 +86,13 @@ func RunCLI(ctx context.Context) {
 const shutdownGrace = 10 * time.Second
 
 func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(args.LogLevel)
 
 	// Cancel on SIGINT/SIGTERM too (centralized; no per-runner signal goroutines needed)
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	ctx = log.Logger.WithContext(ctx)
 
 	config := gosdk.MakeAppchainConfig(ChainID)
 
