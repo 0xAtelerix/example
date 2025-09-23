@@ -21,5 +21,6 @@ func (*StateTransition) ProcessBlock(
 	_ kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {
 	log.Info().Uint64("n", b.BlockNumber).Msg("block processing is disabled")
+
 	return nil, nil
 }

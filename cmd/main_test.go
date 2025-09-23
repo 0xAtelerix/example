@@ -22,6 +22,22 @@ import (
 	"github.com/0xAtelerix/example/application"
 )
 
+func waitUntil(ctx context.Context, f func() bool) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if f() {
+				return nil
+			}
+		}
+	}
+}
+
 // TestEndToEnd spins up main(), posts a transaction to the /rpc endpoint and
 // verifies we get a 2xx response.
 func TestEndToEnd(t *testing.T) {
@@ -37,7 +53,7 @@ func TestEndToEnd(t *testing.T) {
 	txDir := filepath.Join(tmp, "tx")
 
 	// Create an empty MDBX database that can be opened in readonly mode
-	err = createEmptyMDBXDatabase(txDir)
+	err = createEmptyMDBXDatabase(txDir, gosdk.TxBucketsTables())
 	require.NoError(t, err, "create empty txBatch database")
 
 	// craft os.Args for main()
@@ -147,11 +163,11 @@ func getFreePort(t *testing.T) int {
 }
 
 // createEmptyMDBXDatabase creates an empty MDBX database that can be opened in readonly mode
-func createEmptyMDBXDatabase(dbPath string) error {
+func createEmptyMDBXDatabase(dbPath string, tableCfg kv.TableCfg) error {
 	tempDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(dbPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return gosdk.TxBucketsTables()
+			return tableCfg
 		}).
 		Open()
 	if err != nil {
