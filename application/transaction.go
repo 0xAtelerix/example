@@ -10,6 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
+func AccountKey(sender string, token string) []byte {
+	return []byte(token + sender)
+}
+
 type Transaction[R Receipt] struct {
 	Sender   string `json:"sender"`
 	Value    uint64 `json:"value"`
@@ -43,12 +47,11 @@ func (e Transaction[R]) Hash() [32]byte {
 func (e Transaction[R]) Process(
 	dbTx kv.RwTx,
 ) (res R, txs []apptypes.ExternalTransaction, err error) {
-
 	var senderBalanceData []byte
 
 	senderTokenKey := AccountKey(e.Sender, e.Token)
 
-	senderBalanceData, err = dbTx.GetOne(accountsBucket, senderTokenKey)
+	senderBalanceData, err = dbTx.GetOne(AccountsBucket, senderTokenKey)
 	if err != nil {
 		return e.failedReceipt(err), nil, nil
 	}
@@ -68,7 +71,7 @@ func (e Transaction[R]) Process(
 
 	receiverTokenKey := AccountKey(e.Receiver, e.Token)
 
-	receiverBalanceData, err = dbTx.GetOne(accountsBucket, receiverTokenKey)
+	receiverBalanceData, err = dbTx.GetOne(AccountsBucket, receiverTokenKey)
 	if err != nil {
 		return e.failedReceipt(err), nil, nil
 	}
@@ -78,57 +81,22 @@ func (e Transaction[R]) Process(
 
 	amount := uint256.NewInt(e.Value)
 
-	// add receiver's balance
-	// reduce sender's balance
 	receiverBalance.Add(receiverBalance, amount)
 	senderBalance.Sub(senderBalance, amount)
 
-	err = dbTx.Put(accountsBucket, senderTokenKey, senderBalance.Bytes())
+	err = dbTx.Put(AccountsBucket, senderTokenKey, senderBalance.Bytes())
 	if err != nil {
 		return e.failedReceipt(err), nil, nil
 	}
 
-	err = dbTx.Put(accountsBucket, receiverTokenKey, receiverBalance.Bytes())
+	err = dbTx.Put(AccountsBucket, receiverTokenKey, receiverBalance.Bytes())
 	if err != nil {
 		return e.failedReceipt(err), nil, nil
 	}
 
-	// return success receipt
 	res = e.successReceipt(senderBalance, receiverBalance)
+
 	return res, []apptypes.ExternalTransaction{}, nil
-}
-
-const (
-	accountsBucket = "appaccounts" // token+account -> value
-)
-
-func Tables() kv.TableCfg {
-	return kv.TableCfg{
-		accountsBucket: {},
-	}
-}
-
-func AccountKey(sender string, token string) []byte {
-	return []byte(token + sender)
-}
-
-//nolint:gochecknoglobals //only for sharding testing
-var accs = make(map[string]map[string][]byte)
-
-func GetAccountKey(sender string, token string) []byte {
-	acc, ok := accs[sender]
-	if !ok {
-		acc = make(map[string][]byte)
-		accs[sender] = acc
-	}
-
-	t, ok := acc[token]
-	if !ok {
-		t = AccountKey(sender, token)
-		acc[token] = t
-	}
-
-	return t
 }
 
 func (e *Transaction[R]) failedReceipt(err error) R {
@@ -142,6 +110,7 @@ func (e *Transaction[R]) failedReceipt(err error) R {
 		TxStatus:     apptypes.ReceiptFailed,
 	}
 }
+
 func (e *Transaction[R]) successReceipt(senderBalance, receiverBalance *uint256.Int) R {
 	return R{
 		TxnHash:         e.Hash(),

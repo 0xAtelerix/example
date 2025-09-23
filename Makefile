@@ -14,30 +14,19 @@ env:
 	go env -w GOPRIVATE=github.com/0xAtelerix/sdk
 	go env -w GOPRIVATE=github.com/0xAtelerix/*
 
-dockerrun:
-	docker run --rm \
-	  -v $(PWD)/test_consenus:/test_consenus \
-	  b00ris/consensusnode:latest \
-	  --snapshot-dir=/test_consenus \
-	  --appchain=1=host.docker.internal:50051
-
 dockerbuild:
-	DOCKER_BUILDKIT=1 docker build --ssh default -t abc/appchain:latest .
+	DOCKER_BUILDKIT=1 docker build --ssh default -t appchain:latest .
 
-## Полный запуск: сборка и запуск контейнеров
-up: build
+up:
 	@echo "🔼 Starting containers..."
-	docker compose up
+	docker compose up -d
 
-## Сборка с SSH-ключом
 build:
 	DOCKER_BUILDKIT=1 docker compose build --ssh default
 
-## Остановить и удалить
 down:
 	docker compose down
 
-## Перезапуск
 restart: down up
 
 clean:

@@ -7,15 +7,18 @@ import (
 
 //nolint:errname // Receipt is not an error type, it just implements Error() method for interface compliance
 type Receipt struct {
-	TxnHash         [32]byte                 `json:"tx_hash"`
-	Sender          string                   `json:"sender"`
-	SenderBalance   *uint256.Int             `json:"sender_balance"`
-	Receiver        string                   `json:"receiver"`
-	ReceiverBalance *uint256.Int             `json:"receiver_balance"`
-	Token           string                   `json:"token"`
-	Value           uint64                   `json:"value"`
-	ErrorMessage    string                   `json:"error,omitempty"`
-	TxStatus        apptypes.TxReceiptStatus `json:"tx_status"`
+	// Base receipt fields
+	TxnHash      [32]byte                 `json:"tx_hash"`
+	ErrorMessage string                   `json:"error,omitempty"`
+	TxStatus     apptypes.TxReceiptStatus `json:"tx_status"`
+
+	// Additional fields based on txn
+	Sender          string       `json:"sender"`
+	SenderBalance   *uint256.Int `json:"sender_balance"`
+	Receiver        string       `json:"receiver"`
+	ReceiverBalance *uint256.Int `json:"receiver_balance"`
+	Token           string       `json:"token"`
+	Value           uint64       `json:"value"`
 }
 
 func (r Receipt) TxHash() [32]byte {

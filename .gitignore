@@ -1,10 +1,6 @@
 .idea
 .vscode
-test
-test_tmp
-chaindb
-localdb
-test_consenus
-test_consenus_app
-appchaindb
-tmpdb
+app_data/
+pelacli_data/
+appchain
+main
