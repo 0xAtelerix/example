@@ -3,6 +3,7 @@ app_data/
 pelacli_data/
 data/
 test_consenus/
+multichain
 
 # Exclude version control
 .git/

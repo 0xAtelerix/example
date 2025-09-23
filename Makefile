@@ -1,3 +1,4 @@
+VERSION=v2.4.0
 
 run:
 	GOPRIVATE=github.com/0xAtelerix/* go run cmd/main.go \
@@ -8,17 +9,6 @@ run:
                                         -stream-dir=/tmp/consensus/events/ \
                                         -multichain-config=./debug/multichain.json \
                                         -rpc-port=:8080
-clean:
-	rm -rf /tmp/example/
-	rm -rf /tmp/consensus/
-
-get:
-	GOPRIVATE=github.com/0xAtelerix/* go get -u github.com/0xAtelerix/sdk/gosdk@a096071d30b17f660551a126b22a6b46d201f386
-
-env:
-	go env -w GOPRIVATE=github.com/0xAtelerix/sdkenv:
-	go env -w GOPRIVATE=github.com/0xAtelerix/sdk
-	go env -w GOPRIVATE=github.com/0xAtelerix/*
 
 dockerbuild:
 	DOCKER_BUILDKIT=1 docker build --ssh default -t appchain:latest .
@@ -35,8 +25,8 @@ down:
 
 restart: down up
 
-#clean:
-#	rm -Rdf appchain localdb test chaindb test_tmp test_consenus_app test_consenus/events test_consenus/fetcher
+clean:
+	rm -Rdf appchain multichain localdb test chaindb test_tmp test_consenus_app test_consenus/events test_consenus/fetcher /tmp/example/ /tmp/consensus/
 
 tidy:
 	GOPRIVATE=github.com/0xAtelerix/* go mod tidy
@@ -47,7 +37,7 @@ tests:
 race-tests:
 	go test -race -short -timeout 30m -failfast -shuffle=on -v ./... $(params)
 
-VERSION=v2.4.0
+
 
 lints-docker: # 'sed' matches version in this string 'golangci-lint@xx.yy.zzz'
 	echo "⚙️ Used lints version: " $(VERSION)

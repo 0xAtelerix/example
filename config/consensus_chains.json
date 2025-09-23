@@ -1,0 +1,8 @@
+[
+  {
+    "ChainID": 11155111,
+    "DBPath": "/multichain/sepolia",
+    "APIKey": "{you sepolia api}",
+    "StartBlock": 9214937
+  }
+]
