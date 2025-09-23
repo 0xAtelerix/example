@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"flag"
+	"github.com/fxamacker/cbor/v2"
 	"net"
 	"net/http"
 	"os"
@@ -37,6 +39,7 @@ type RuntimeArgs struct {
 	EthereumBlocksPath string
 	SolBlocksPath      string
 	RPCPort            string
+	MutlichainConfig   gosdk.MultichainConfig
 	UseFiber           bool
 	LogLevel           zerolog.Level
 }
@@ -50,7 +53,7 @@ func main() {
 }
 
 func RunCLI(ctx context.Context) {
-	config := gosdk.MakeAppchainConfig(ChainID)
+	config := gosdk.MakeAppchainConfig(ChainID, nil)
 
 	// Use a local FlagSet (no globals).
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -64,7 +67,8 @@ func RunCLI(ctx context.Context) {
 	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
 	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
-	logLevel := fs.Int("log-level", int(zerolog.DebugLevel), "Logging level")
+	multichainConfigJson := fs.String("multichain-config", "", "Multichain config JSON path")
+	logLevel := fs.Int("log-level", int(zerolog.InfoLevel), "Logging level")
 
 	if *logLevel > int(zerolog.Disabled) {
 		*logLevel = int(zerolog.DebugLevel)
@@ -73,6 +77,19 @@ func RunCLI(ctx context.Context) {
 	}
 
 	_ = fs.Parse(os.Args[1:])
+
+	var mcDbs gosdk.MultichainConfig
+	if multichainConfigJson != nil && *multichainConfigJson != "" {
+		f, err := os.ReadFile(*multichainConfigJson)
+		if err != nil {
+			log.Panic().Err(err).Msg("Error reading multichain config")
+		}
+		err = json.Unmarshal(f, &mcDbs)
+		if err != nil {
+			log.Warn().Err(err).Msg("Error unmarshalling multichain config")
+		}
+		config.MultichainStateDB = mcDbs
+	}
 
 	args := RuntimeArgs{
 		EmitterPort:        *emitterPort,
@@ -84,6 +101,7 @@ func RunCLI(ctx context.Context) {
 		SolBlocksPath:      *solBlocksPath,
 		RPCPort:            *rpcPort,
 		LogLevel:           zerolog.Level(*logLevel),
+		MutlichainConfig:   mcDbs,
 	}
 
 	Run(ctx, args, nil)
@@ -100,15 +118,23 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 
 	ctx = log.Logger.WithContext(ctx)
 
-	config := gosdk.MakeAppchainConfig(ChainID)
+	config := gosdk.MakeAppchainConfig(ChainID, args.MutlichainConfig)
 
 	config.EmitterPort = args.EmitterPort
 	config.AppchainDBPath = args.AppchainDBPath
 	config.EventStreamDir = args.EventStreamDir
 	config.TxStreamDir = args.TxStreamDir
 
+	chainDBs, err := gosdk.NewMultichainStateAccessDB(args.MutlichainConfig)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create chain db")
+	}
+	msa := gosdk.NewMultichainStateAccess(chainDBs)
+
 	stateTransition := gosdk.NewBatchProcesser[application.Transaction[application.Receipt]](
 		application.NewStateTransition(),
+		msa,
+		nil,
 	)
 
 	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
@@ -138,6 +164,21 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 
 	defer appchainDB.Close()
 
+	//fixme dynamic val set
+	valset := &gosdk.ValidatorSet{Set: map[gosdk.ValidatorID]gosdk.Stake{0: 1}}
+	var epochKey [4]byte
+	binary.BigEndian.PutUint32(epochKey[:], 1)
+	valsetData, err := cbor.Marshal(valset)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to marshal validator set data")
+	}
+	err = appchainDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(gosdk.ValsetBucket, epochKey[:], valsetData)
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
+	}
+
 	txPool := txpool.NewTxPool[application.Transaction[application.Receipt]](
 		localDB,
 	)
@@ -149,18 +190,21 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		}).
 		Readonly().Open()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to tx batch mdbx database")
+		log.Fatal().Str("path", config.TxStreamDir).Err(err).Msg("Failed to tx batch mdbx database")
 	}
 
 	log.Info().Msg("Starting appchain...")
 
-	appchainExample, err := gosdk.NewAppchain(
+	appchainExample := gosdk.NewAppchain(
 		stateTransition,
 		application.BlockConstructor,
 		txPool,
 		config,
 		appchainDB,
-		txBatchDB)
+		nil,
+		msa,
+		txBatchDB,
+	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to start appchain")
 	}

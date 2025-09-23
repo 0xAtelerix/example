@@ -8,3 +8,4 @@ test_consenus
 test_consenus_app
 appchaindb
 tmpdb
+debug
