@@ -131,24 +131,6 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 	}
 	msa := gosdk.NewMultichainStateAccess(chainDBs)
 
-	stateTransition := gosdk.NewBatchProcesser[application.Transaction[application.Receipt]](
-		application.NewStateTransition(),
-		msa,
-		nil,
-	)
-
-	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(args.LocalDBPath).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return txpool.Tables()
-		}).
-		Open()
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to local mdbx database")
-	}
-
-	defer localDB.Close()
-
 	// инициализируем базу на нашей стороне
 	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(config.AppchainDBPath).
@@ -164,8 +146,31 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 
 	defer appchainDB.Close()
 
+	subs, err := gosdk.NewSubscriber(ctx, appchainDB)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create subscriber")
+	}
+
+	stateTransition := gosdk.NewBatchProcesser[application.Transaction[application.Receipt]](
+		application.NewStateTransition(msa),
+		msa,
+		subs,
+	)
+
+	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(args.LocalDBPath).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return txpool.Tables()
+		}).
+		Open()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to local mdbx database")
+	}
+
+	defer localDB.Close()
+
 	//fixme dynamic val set
-	valset := &gosdk.ValidatorSet{Set: map[gosdk.ValidatorID]gosdk.Stake{0: 1}}
+	valset := &gosdk.ValidatorSet{Set: map[gosdk.ValidatorID]gosdk.Stake{0: 100}}
 	var epochKey [4]byte
 	binary.BigEndian.PutUint32(epochKey[:], 1)
 	valsetData, err := cbor.Marshal(valset)
@@ -201,7 +206,7 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		txPool,
 		config,
 		appchainDB,
-		nil,
+		subs,
 		msa,
 		txBatchDB,
 	)

@@ -46,8 +46,8 @@ down:
 ## Перезапуск
 restart: down up
 
-clean:
-	rm -Rdf appchain localdb test chaindb test_tmp test_consenus_app test_consenus/events test_consenus/fetcher
+#clean:
+#	rm -Rdf appchain localdb test chaindb test_tmp test_consenus_app test_consenus/events test_consenus/fetcher
 
 tidy:
 	GOPRIVATE=github.com/0xAtelerix/* go mod tidy

@@ -1,6 +1,8 @@
 package application
 
 import (
+	"context"
+	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/rs/zerolog/log"
@@ -9,17 +11,35 @@ import (
 // step 2:
 // How do you process external blocks and send external transactions
 // We strongly recomment to keep it stateless
-type StateTransition struct{}
+type StateTransition struct {
+	msa *gosdk.MultichainStateAccess
+}
 
-func NewStateTransition() *StateTransition {
-	return &StateTransition{}
+func NewStateTransition(msa *gosdk.MultichainStateAccess) *StateTransition {
+	return &StateTransition{
+		msa: msa}
 }
 
 // how to external chains blocks
-func (*StateTransition) ProcessBlock(
+func (st *StateTransition) ProcessBlock(
 	b apptypes.ExternalBlock,
 	_ kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {
-	log.Info().Uint64("n", b.BlockNumber).Msg("block processing is disabled")
+	block, err := st.msa.EthBlock(context.Background(), b)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := st.msa.EthReceipts(context.Background(), b)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info().
+		Uint64("chainID", b.ChainID).
+		Uint64("n", block.Header.Number.Uint64()).
+		Str("hash", block.Header.Hash().String()).
+		Int("transactions", len(block.Body.Transactions)).
+		Int("receipts", len(receipts)).
+		Msg("External block")
 	return nil, nil
 }
