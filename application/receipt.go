@@ -1,29 +1,34 @@
 package application
 
 import (
-	"crypto/sha256"
-
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/holiman/uint256"
 )
 
 //nolint:errname // Receipt is not an error type, it just implements Error() method for interface compliance
 type Receipt struct {
+	// Base receipt fields
+	TxnHash      [32]byte                 `json:"tx_hash"`
+	ErrorMessage string                   `json:"error,omitempty"`
+	TxStatus     apptypes.TxReceiptStatus `json:"tx_status"`
+
+	// Additional fields based on txn
 	Sender          string       `json:"sender"`
 	SenderBalance   *uint256.Int `json:"sender_balance"`
 	Receiver        string       `json:"receiver"`
 	ReceiverBalance *uint256.Int `json:"receiver_balance"`
 	Token           string       `json:"token"`
+	Value           uint64       `json:"value"`
 }
 
 func (r Receipt) TxHash() [32]byte {
-	return sha256.Sum256([]byte(r.Sender + r.Token + r.Receiver))
+	return r.TxnHash
 }
 
-func (Receipt) Status() apptypes.TxReceiptStatus {
-	return apptypes.ReceiptConfirmed
+func (r Receipt) Status() apptypes.TxReceiptStatus {
+	return r.TxStatus
 }
 
-func (Receipt) Error() string {
-	return ""
+func (r Receipt) Error() string {
+	return r.ErrorMessage
 }

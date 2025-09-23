@@ -1,5 +1,9 @@
 .idea
 .vscode
+app_data/
+pelacli_data/
+appchain
+main
 test
 test_tmp
 chaindb

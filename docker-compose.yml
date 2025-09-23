@@ -3,25 +3,31 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    pid: "service:pelacli"
+    image: appchain:latest
     volumes:
-      - ./test_consenus:/test_consenus:ro   # 👈 Только чтение
-      - ./test_consenus_app:/test_consenus_app  # 👈 По умолчанию read-write
+      - ./pelacli_data:/consensus_data
+      - ./app_data:/data
     ports:
-      - "50051:50051"
+      - "9090:9090"
       - "8080:8080"
     depends_on:
-      - consensusnode
+      - pelacli
     command:
-      - --emitter-port=:50051
-      - --db-path=/test_consenus_app/db
-      - --local-db-path=/test_consenus_app/tmpdb
-      - --stream-dir=/test_consenus/snapshot.data
+      - --emitter-port=:9090
+      - --db-path=/data/appchain-db
+      - --local-db-path=/data/local-db
+      - --stream-dir=/consensus_data/events
+      - --tx-dir=/consensus_data/fetcher/snapshots/42
       - --rpc-port=:8080
 
-  consensusnode:
-    image: pelagosnetwork/consensusnode:latest
+  pelacli:
+    container_name: pelacli
+    image: pelagosnetwork/pelacli:latest
     volumes:
-      - ./test_consenus:/test_consenus  # 👈 По умолчанию read-write
+      - ./pelacli_data:/consensus_data
     command:
-      - --snapshot-dir=/test_consenus
-      - --appchain=1=appchain:50051
+      - consensus
+      - --snapshot-dir=/consensus_data
+      - --appchain=42=appchain:9090
+      - --ask-period=1s

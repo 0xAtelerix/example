@@ -3,21 +3,16 @@ package main
 import (
 	"context"
 	"encoding/binary"
-	"errors"
+	"encoding/json"
 	"flag"
-	"github.com/fxamacker/cbor/v2"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/0xAtelerix/sdk/gosdk"
+	"github.com/0xAtelerix/sdk/gosdk/rpc"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
-	"github.com/goccy/go-json"
-	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/adaptor"
+	"github.com/fxamacker/cbor/v2"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
@@ -40,7 +35,6 @@ type RuntimeArgs struct {
 	SolBlocksPath      string
 	RPCPort            string
 	MutlichainConfig   gosdk.MultichainConfig
-	UseFiber           bool
 	LogLevel           zerolog.Level
 }
 
@@ -67,7 +61,7 @@ func RunCLI(ctx context.Context) {
 	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
 	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
-	multichainConfigJson := fs.String("multichain-config", "", "Multichain config JSON path")
+	multichainConfigJSON := fs.String("multichain-config", "", "Multichain config JSON path")
 	logLevel := fs.Int("log-level", int(zerolog.InfoLevel), "Logging level")
 
 	if *logLevel > int(zerolog.Disabled) {
@@ -79,16 +73,17 @@ func RunCLI(ctx context.Context) {
 	_ = fs.Parse(os.Args[1:])
 
 	var mcDbs gosdk.MultichainConfig
-	if multichainConfigJson != nil && *multichainConfigJson != "" {
-		f, err := os.ReadFile(*multichainConfigJson)
+
+	if multichainConfigJSON != nil && *multichainConfigJSON != "" {
+		f, err := os.ReadFile(*multichainConfigJSON)
 		if err != nil {
 			log.Panic().Err(err).Msg("Error reading multichain config")
 		}
+
 		err = json.Unmarshal(f, &mcDbs)
 		if err != nil {
 			log.Warn().Err(err).Msg("Error unmarshalling multichain config")
 		}
-		config.MultichainStateDB = mcDbs
 	}
 
 	args := RuntimeArgs{
@@ -107,16 +102,12 @@ func RunCLI(ctx context.Context) {
 	Run(ctx, args, nil)
 }
 
-const shutdownGrace = 10 * time.Second
-
-func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
+func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(args.LogLevel)
 
 	// Cancel on SIGINT/SIGTERM too (centralized; no per-runner signal goroutines needed)
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	ctx = log.Logger.WithContext(ctx)
 
 	config := gosdk.MakeAppchainConfig(ChainID, args.MutlichainConfig)
 
@@ -129,6 +120,7 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create chain db")
 	}
+
 	msa := gosdk.NewMultichainStateAccess(chainDBs)
 
 	// инициализируем базу на нашей стороне
@@ -169,14 +161,16 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 
 	defer localDB.Close()
 
-	//fixme dynamic val set
+	// fixme dynamic val set
 	valset := &gosdk.ValidatorSet{Set: map[gosdk.ValidatorID]gosdk.Stake{0: 100}}
 	var epochKey [4]byte
 	binary.BigEndian.PutUint32(epochKey[:], 1)
+
 	valsetData, err := cbor.Marshal(valset)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to marshal validator set data")
 	}
+
 	err = appchainDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(gosdk.ValsetBucket, epochKey[:], valsetData)
 	})
@@ -214,6 +208,13 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		log.Fatal().Err(err).Msg("Failed to start appchain")
 	}
 
+	// Initialize genesis accounts and trading pairs after all databases are ready
+	log.Info().Msg("Initializing genesis state...")
+
+	if err := application.InitializeGenesis(ctx, appchainDB); err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize genesis state")
+	}
+
 	// Run appchain in goroutine
 	runErr := make(chan error, 1)
 
@@ -226,159 +227,16 @@ func Run(ctx context.Context, args RuntimeArgs, ready chan<- int) {
 		}
 	}()
 
-	if args.UseFiber {
-		runFiber(ctx, args, txPool, runErr, ready)
+	rpcServer := rpc.NewStandardRPCServer()
 
-		return
-	}
-	// else: keep your net/http path if you want both
-	runStdHTTP(ctx, args, txPool, runErr, ready)
-}
+	rpc.AddStandardMethods(rpcServer, appchainDB, txPool)
 
-func runStdHTTP(
-	ctx context.Context,
-	args RuntimeArgs,
-	txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt],
-	runErr chan error,
-	ready chan<- int,
-) {
-	// Start JSON-RPC server in goroutine
-	mux := http.NewServeMux()
-	mux.Handle("/rpc", &api.RPCServer{Pool: txPool})
+	// Add custom RPC methods
+	api.NewCustomRPC(rpcServer, appchainDB).AddRPCMethods()
 
-	lc := &net.ListenConfig{}
+	log.Info().Msg("Starting RPC server on :" + args.RPCPort)
 
-	ln, err := lc.Listen(ctx, "tcp", args.RPCPort) // ":0" allowed
-	if err != nil {
-		log.Fatal().Err(err).Msg("listen rpc")
-	}
-
-	if ready != nil {
-		if ta, ok := ln.Addr().(*net.TCPAddr); ok {
-			ready <- ta.Port // publish actual port
-		} else {
-			ready <- 0
-		}
-
-		close(ready)
-	}
-
-	server := &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	// serve
-	serveErr := make(chan error, 1)
-
-	go func() { serveErr <- server.Serve(ln) }()
-
-	select {
-	case <-ctx.Done():
-		log.Info().Str("shutting down", ctx.Err().Error()).Msg("Received shutdown signal")
-
-		//nolint:contextcheck // shutdown, the context above is already expired
-		if err := server.Shutdown(context.Background()); err != nil {
-			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
-
-			_ = server.Close()
-		}
-
-		<-serveErr // drain
-
-	case err := <-serveErr:
-		// Server exited on its own
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal().Err(err).Msg("HTTP server crashed")
-		}
-
-	case err := <-runErr:
-		if err != nil {
-			log.Error().Err(err).Msg("Appchain stopped with error")
-		}
-
-		//nolint:contextcheck // shutdown, the context above is already expired
-		if err := server.Shutdown(context.Background()); err != nil {
-			log.Error().Err(err).Msg("Failed to shutdown JSON-RPC server gracefully")
-		}
-
-		<-serveErr
-	}
-}
-
-func runFiber(
-	ctx context.Context,
-	args RuntimeArgs,
-	txPool *txpool.TxPool[application.Transaction[application.Receipt], application.Receipt],
-	runErr chan error,
-	ready chan<- int,
-) {
-	// Use faster JSON codec (optional but recommended).
-	app := fiber.New(fiber.Config{
-		ReadTimeout: 0, // we already limit at TCP layer/timeouts around listener
-		JSONEncoder: json.Marshal,
-		JSONDecoder: json.Unmarshal,
-		// You can tune these if needed:
-		// Prefork:           true, // beware on macOS; better for Linux prod with SO_REUSEPORT
-		// ReduceMemoryUsage: true,
-	})
-
-	// Reuse your existing net/http handler without rewriting it.
-	h := &api.RPCServer{Pool: txPool}
-	app.All("/rpc", adaptor.HTTPHandler(h))
-
-	// Context-aware listener (satisfies `noctx` linter).
-	lc := &net.ListenConfig{}
-
-	ln, err := lc.Listen(ctx, "tcp", args.RPCPort) // ":0" allowed
-	if err != nil {
-		log.Fatal().Err(err).Msg("listen rpc")
-	}
-
-	// Publish chosen port (for your benchmark that starts on :0).
-	if ready != nil {
-		if ta, ok := ln.Addr().(*net.TCPAddr); ok {
-			ready <- ta.Port
-		} else {
-			ready <- 0
-		}
-
-		close(ready)
-	}
-
-	// Serve in background; Fiber provides Listener().
-	serveErr := make(chan error, 1)
-
-	go func() { serveErr <- app.Listener(ln) }()
-
-	select {
-	case <-ctx.Done():
-		// Start graceful shutdown.
-		shutdownCh := make(chan struct{})
-
-		go func() {
-			_ = app.Shutdown()
-
-			close(shutdownCh)
-		}()
-
-		select {
-		case <-shutdownCh:
-		case <-time.After(shutdownGrace):
-			// Force-close listener if needed (rare).
-			_ = ln.Close()
-		}
-
-		// Drain serveErr (Fiber returns error on closed listener).
-		<-serveErr
-
-	case err := <-serveErr:
-		// Crashed on its own.
-		if err != nil && !errors.Is(err, net.ErrClosed) {
-			log.Fatal().Err(err).Msg("Fiber server crashed")
-		}
-
-	case err := <-runErr:
-		log.Error().Err(err).Msg("Appchain stopped with error")
+	if err := rpcServer.StartHTTPServer(ctx, args.RPCPort); err != nil {
+		log.Fatal().Err(err).Msg("Failed to start RPC server")
 	}
 }
