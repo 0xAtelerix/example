@@ -2,12 +2,18 @@
 run:
 	GOPRIVATE=github.com/0xAtelerix/* go run cmd/main.go \
                                         -emitter-port=:50051 \
-                                        -db-path=./test \
-                                        -local-db-path=./test_tmp \
-                                        -stream-dir=./test_consenus/snapshot.data \
+                                        -db-path=/tmp/example/db/ \
+                                        -tx-dir=/tmp/consensus/fetcher/snapshots/42 \
+                                        -local-db-path=/tmp/example/test_tmp \
+                                        -stream-dir=/tmp/consensus/events/ \
+                                        -multichain-config=./debug/multichain.json \
                                         -rpc-port=:8080
+clean:
+	rm -rf /tmp/example/
+	rm -rf /tmp/consensus/
+
 get:
-	GOPRIVATE=github.com/0xAtelerix/* go mod download github.com/0xAtelerix/sdk/gosdk
+	GOPRIVATE=github.com/0xAtelerix/* go get -u github.com/0xAtelerix/sdk/gosdk@a096071d30b17f660551a126b22a6b46d201f386
 
 env:
 	go env -w GOPRIVATE=github.com/0xAtelerix/sdkenv:

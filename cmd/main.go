@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/0xAtelerix/sdk/gosdk"
-	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/0xAtelerix/sdk/gosdk/rpc"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
 	"github.com/fxamacker/cbor/v2"
@@ -19,19 +19,23 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/0xAtelerix/example/api"
 	"github.com/0xAtelerix/example/application"
+	"github.com/0xAtelerix/example/application/api"
 )
 
 const ChainID = 42
 
 type RuntimeArgs struct {
-	EmitterPort    string
-	AppchainDBPath string
-	EventStreamDir string
-	TxStreamDir    string
-	LocalDBPath    string
-	RPCPort        string
+	EmitterPort        string
+	AppchainDBPath     string
+	EventStreamDir     string
+	TxStreamDir        string
+	LocalDBPath        string
+	EthereumBlocksPath string
+	SolBlocksPath      string
+	RPCPort            string
+	MutlichainConfig   gosdk.MultichainConfig
+	LogLevel           zerolog.Level
 }
 
 func main() {
@@ -43,7 +47,7 @@ func main() {
 }
 
 func RunCLI(ctx context.Context) {
-	config := gosdk.MakeAppchainConfig(ChainID, map[apptypes.ChainType]string{})
+	config := gosdk.MakeAppchainConfig(ChainID, nil)
 
 	// Use a local FlagSet (no globals).
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -54,17 +58,45 @@ func RunCLI(ctx context.Context) {
 	txDir := fs.String("tx-dir", config.TxStreamDir, "Transaction stream directory")
 
 	localDBPath := fs.String("local-db-path", "./localdb", "Path to local DB")
+	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
+	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
+	multichainConfigJSON := fs.String("multichain-config", "", "Multichain config JSON path")
+	logLevel := fs.Int("log-level", int(zerolog.InfoLevel), "Logging level")
+
+	if *logLevel > int(zerolog.Disabled) {
+		*logLevel = int(zerolog.DebugLevel)
+	} else if *logLevel < int(zerolog.TraceLevel) {
+		*logLevel = int(zerolog.TraceLevel)
+	}
 
 	_ = fs.Parse(os.Args[1:])
 
+	var mcDbs gosdk.MultichainConfig
+
+	if multichainConfigJSON != nil && *multichainConfigJSON != "" {
+		f, err := os.ReadFile(*multichainConfigJSON)
+		if err != nil {
+			log.Panic().Err(err).Msg("Error reading multichain config")
+		}
+
+		err = json.Unmarshal(f, &mcDbs)
+		if err != nil {
+			log.Warn().Err(err).Msg("Error unmarshalling multichain config")
+		}
+	}
+
 	args := RuntimeArgs{
-		EmitterPort:    *emitterPort,
-		AppchainDBPath: *appchainDBPath,
-		EventStreamDir: *streamDir,
-		TxStreamDir:    *txDir,
-		LocalDBPath:    *localDBPath,
-		RPCPort:        *rpcPort,
+		EmitterPort:        *emitterPort,
+		AppchainDBPath:     *appchainDBPath,
+		EventStreamDir:     *streamDir,
+		TxStreamDir:        *txDir,
+		LocalDBPath:        *localDBPath,
+		EthereumBlocksPath: *ethereumBlocksPath,
+		SolBlocksPath:      *solBlocksPath,
+		RPCPort:            *rpcPort,
+		LogLevel:           zerolog.Level(*logLevel),
+		MutlichainConfig:   mcDbs,
 	}
 
 	Run(ctx, args, nil)
@@ -77,19 +109,25 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	config := gosdk.MakeAppchainConfig(ChainID, map[apptypes.ChainType]string{})
-
-	extChainDBs, err := gosdk.NewMultichainStateAccessDB(config.MultichainStateDB)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to open external chain dbs")
-	}
-
-	multiState := gosdk.NewMultichainStateAccess(extChainDBs)
+	config := gosdk.MakeAppchainConfig(ChainID, args.MutlichainConfig)
 
 	config.EmitterPort = args.EmitterPort
 	config.AppchainDBPath = args.AppchainDBPath
 	config.EventStreamDir = args.EventStreamDir
 	config.TxStreamDir = args.TxStreamDir
+
+	chainDBs, err := gosdk.NewMultichainStateAccessDB(config.MultichainStateDB)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create chain db")
+	}
+
+	msa := gosdk.NewMultichainStateAccess(chainDBs)
+
+	stateTransition := gosdk.NewBatchProcesser[application.Transaction[application.Receipt]](
+		application.NewStateTransition(),
+		msa,
+		nil,
+	)
 
 	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(args.LocalDBPath).
@@ -117,6 +155,24 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 
 	defer appchainDB.Close()
 
+	// fixme dynamic val set
+	valset := &gosdk.ValidatorSet{Set: map[gosdk.ValidatorID]gosdk.Stake{0: 1}}
+
+	var epochKey [4]byte
+	binary.BigEndian.PutUint32(epochKey[:], 1)
+
+	valsetData, err := cbor.Marshal(valset)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to marshal validator set data")
+	}
+
+	err = appchainDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(gosdk.ValsetBucket, epochKey[:], valsetData)
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to appchain mdbx database")
+	}
+
 	txPool := txpool.NewTxPool[application.Transaction[application.Receipt]](
 		localDB,
 	)
@@ -128,44 +184,10 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 		}).
 		Readonly().Open()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to tx batch mdbx database")
+		log.Fatal().Str("path", config.TxStreamDir).Err(err).Msg("Failed to tx batch mdbx database")
 	}
-
-	subscriber, err := gosdk.NewSubscriber(ctx, appchainDB)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to create event subscriber")
-	}
-
-	stateTransition := gosdk.NewBatchProcesser[application.Transaction[application.Receipt]](
-		application.NewStateTransition(),
-		multiState,
-		subscriber,
-	)
 
 	log.Info().Msg("Starting appchain...")
-
-	// Add genesis validator set, Temp Solution
-	if err := appchainDB.Update(ctx, func(txn kv.RwTx) error {
-		valsetMap := map[gosdk.ValidatorID]gosdk.Stake{
-			1: 10,
-			2: 20,
-			3: 30,
-		}
-
-		valset := gosdk.NewValidatorSet(valsetMap)
-
-		valsetBytes, err := cbor.Marshal(valset)
-		if err != nil {
-			return err
-		}
-
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], 0)
-
-		return txn.Put(gosdk.ValsetBucket, key[:], valsetBytes)
-	}); err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize genesis validator set")
-	}
 
 	appchainExample := gosdk.NewAppchain(
 		stateTransition,
@@ -173,9 +195,13 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 		txPool,
 		config,
 		appchainDB,
-		subscriber,
-		multiState,
-		txBatchDB)
+		nil,
+		msa,
+		txBatchDB,
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to start appchain")
+	}
 
 	// Initialize genesis accounts and trading pairs after all databases are ready
 	log.Info().Msg("Initializing genesis state...")
