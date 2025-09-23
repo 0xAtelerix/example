@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/0xAtelerix/sdk/gosdk/rpc"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
@@ -175,8 +177,12 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 	rpcAddress := "http://127.0.0.1:18545/rpc"
 
 	errServer := make(chan error, 1)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 
 	go func() {
+		wg.Done()
+
 		errServer <- rpcServer.StartHTTPServer(t.Context(), ":18545")
 	}()
 
@@ -187,6 +193,8 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 		}
 	default:
 		// continue
+		wg.Wait()
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
