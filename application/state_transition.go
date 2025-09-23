@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -17,7 +18,8 @@ type StateTransition struct {
 
 func NewStateTransition(msa *gosdk.MultichainStateAccess) *StateTransition {
 	return &StateTransition{
-		msa: msa}
+		msa: msa,
+	}
 }
 
 // how to external chains blocks
@@ -29,6 +31,7 @@ func (st *StateTransition) ProcessBlock(
 	if err != nil {
 		return nil, err
 	}
+
 	receipts, err := st.msa.EthReceipts(context.Background(), b)
 	if err != nil {
 		return nil, err
@@ -41,5 +44,6 @@ func (st *StateTransition) ProcessBlock(
 		Int("transactions", len(block.Body.Transactions)).
 		Int("receipts", len(receipts)).
 		Msg("External block")
+
 	return nil, nil
 }

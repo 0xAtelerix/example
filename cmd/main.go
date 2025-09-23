@@ -163,6 +163,7 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 
 	// fixme dynamic val set
 	valset := &gosdk.ValidatorSet{Set: map[gosdk.ValidatorID]gosdk.Stake{0: 100}}
+
 	var epochKey [4]byte
 	binary.BigEndian.PutUint32(epochKey[:], 1)
 
@@ -204,6 +205,7 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 		msa,
 		txBatchDB,
 	)
+
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to start appchain")
 	}

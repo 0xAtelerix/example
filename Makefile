@@ -66,3 +66,6 @@ deps-ci:
 
 lints:
 	$$(go env GOPATH)/bin/golangci-lint run ./... -v --timeout 10m
+
+lints-fix:
+	$$(go env GOPATH)/bin/golangci-lint run ./... -v --timeout 10m --fix
