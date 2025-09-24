@@ -1,0 +1,16 @@
+.idea
+.vscode
+app_data/
+pelacli_data/
+appchain
+main
+test
+test_tmp
+chaindb
+localdb
+test_consenus
+test_consenus_app
+appchaindb
+tmpdb
+debug
+multichain
