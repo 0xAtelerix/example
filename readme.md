@@ -1,16 +1,16 @@
 # Pelagos Appchain — Build an Appchain with the Go SDK
 
 > This repo is a **skeleton** for building your own appchain on top of the Pelagos Go SDK.
-> It comes with a runnable **docker-compose** that includes both your appchain node and a **consensus** (`pelacli`) that simulates consensus and feeds external chain data.
+> It comes with a runnable **docker-compose** that includes both your appchain node and a **consensus** (`pelacli`) that simulates consensus in your local environment and feeds external chain data.
 
 ## What you get out of the box
 
-* A minimal **block type** (`Block`) that satisfies `apptypes.AppchainBlock`.
+* A minimal **block type** (`Block`) that satisfies `apptypes.AppchainBlock` from the SDK.
 * A **transaction** (`Transaction`) and **receipt** (`Receipt`) implementing a simple token transfer with balances in MDBX.
 * A **stateless external-block adapter** (`StateTransition`) that shows how to fetch/inspect Ethereum/Solana data via `MultichainStateAccess`.
 * **Genesis seeding** to fund demo users (`alice`, `bob`, …) with USDT/BTC/ETH balances.
 * **Buckets** (tables) for app state (`appaccounts`), receipts, blocks, checkpoints, etc.
-* A runnable `main.go` that wires the SDK, DBs, tx pool, validator set, the appchain loop, and **JSON-RPC**.
+* A runnable `main.go` that wires the SDK, DBs, tx-pool, validator set, the appchain loop, and default **JSON-RPC**.
 * One **custom JSON-RPC** (`getBalance`) + **standard** ones (`sendTransaction`, `getTransactionStatus`, `getTransactionReceipt`, …).
 * A **docker-compose** that runs the node together with `pelacli` so your txs actually progress. 
 
@@ -25,7 +25,7 @@
 3. The appchain run loop consumes **events + tx-batches**, executes your `Transaction.Process` inside a DB write transaction, persists **receipts**, builds a **block**, and writes a **checkpoint**.
 4. JSON-RPC exposes tx **status**, **receipts**, and your **custom methods**.
 
-> Status lifecycle: **Pending** (in tx pool) → **Batched** (pulled by pelacli) → **Processed/Failed** (after your logic runs in a block).
+> Status lifecycle: **Pending** (in tx pool) → **Batched** (pulled by pelacli) → **Processed/Failed** (after your txn processing logic runs in a block).
 
 * **Transactions don’t auto-finalize.**
   Without the **consensus** you’ll only ever see `Pending`. This compose includes `pelacli` to move them forward.
@@ -54,9 +54,9 @@
 │  ├─ genesis.go          # One-time state seeding (demo balances)
 │  ├─ receipt.go          # Receipt type
 │  ├─ state_transition.go # External-chain ingestion (stateless)
-│  └─ transaction.go      # Business logic (transfers)
-├─ application/api/
-│  └─ api.go              # Custom RPC (getBalance)
+│  ├─ transaction.go      # Business logic (transfers)
+│  └─ api/
+│     └─ api.go           # Custom JSON-RPC methods (getBalance)
 ├─ cmd/main.go            # Wiring & run loop (the app binary)
 ├─ Dockerfile
 └─ docker-compose.yml
@@ -167,6 +167,7 @@ services:
 * Ensure `config/chain_data.json` points to the same MDBX path(s).
 
 2. Start:
+ * Make sure local docker daemon is working
 
 ```bash
 docker compose up -d
@@ -183,6 +184,12 @@ curl -s http://localhost:8080/health | jq .
 ```bash
 docker compose logs -f pelacli
 docker compose logs -f appchain
+```
+
+5. Test:
+ * If you are running the skeleton app without changes, you can use the provided script to send test transactions.
+```bash
+./test_txns.sh
 ```
 
 > On the first run, pelacli will populate MDBX and start producing events/tx-batches. Your appchain waits until the event file and tx-batch DB exist, then begins processing.
