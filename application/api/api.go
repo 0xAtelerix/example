@@ -25,7 +25,7 @@ func NewCustomRPC(rpcServer *rpc.StandardRPCServer, db kv.RoDB) *CustomRPC {
 }
 
 func (c *CustomRPC) AddRPCMethods() {
-	c.rpcServer.AddCustomMethod("getBalance", c.GetBalance)
+	c.rpcServer.AddMethod("getBalance", c.GetBalance)
 }
 
 func (c *CustomRPC) GetBalance(ctx context.Context, params []any) (any, error) {

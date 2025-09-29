@@ -229,11 +229,15 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 		}
 	}()
 
-	rpcServer := rpc.NewStandardRPCServer()
+	rpcServer := rpc.NewStandardRPCServer(nil)
 
+	// Optional: add middleware for logging
+	rpcServer.AddMiddleware(api.NewExampleMiddleware(log.Logger))
+
+	// Add standard RPC methods - Refer RPC readme in sdk for details
 	rpc.AddStandardMethods(rpcServer, appchainDB, txPool)
 
-	// Add custom RPC methods
+	// Add custom RPC methods - Optional
 	api.NewCustomRPC(rpcServer, appchainDB).AddRPCMethods()
 
 	log.Info().Msg("Starting RPC server on :" + args.RPCPort)
