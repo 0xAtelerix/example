@@ -26,7 +26,7 @@ down:
 restart: down up
 
 clean:
-	rm -Rdf appchain multichain localdb test chaindb test_tmp test_consenus_app test_consenus/events test_consenus/fetcher /tmp/example/ /tmp/consensus/ app_data pelacli_data
+	rm -Rdf appchain multichain localdb test chaindb test_tmp test_consenus_app test_consenus/* /tmp/example/ /tmp/consensus/ app_data pelacli_data
 
 tidy:
 	go mod tidy
