@@ -30,6 +30,7 @@ services:
     volumes:
       - ./pelacli_data:/consensus_data
       - ./config/consensus_chains.json:/consensus_chains.json:ro
+      - ./config/ext_networks.json:/ext_networks.json:ro
       - ./multichain:/multichain
     command:
       - consensus
@@ -38,4 +39,5 @@ services:
       - --ask-period=1s
       - --multichain-dir=/consensus_data/multichain_db
       - --chains-json=/consensus_chains.json
+      - --ext-txn-config-json=/ext_networks.json
 

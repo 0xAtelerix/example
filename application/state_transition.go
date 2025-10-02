@@ -16,8 +16,21 @@ import (
 )
 
 const (
-	// Deploy your contract and set the address here - This is demo address on Polygon-Amoy
-	AppchainContractAddress = "0xa464F92b0502b277Ae0Fb8642fAac9A64faE2be1"
+	// ExampleContractAddress is the deployed Example contract address
+	//
+	// DEPLOYMENT INSTRUCTIONS:
+	// 1. Navigate to the SDK contracts directory:
+	//    cd /path/to/0xAtelerix/sdk/contracts
+	// 2. Deploy the Example contract:
+	//    cd scripts && ./deploy_example.sh
+	// 3. Update this address with your deployed contract address
+	// 4. Update signature or ABI if your contract events differ
+	//
+	// This is a demo address on Polygon-Amoy testnet.
+	ExampleContractAddress = "0x102a91394927a2b44020f72cF96162142c242DA4"
+
+	// Event signatures for the Example contract events
+	// These correspond to events in 0xAtelerix/sdk/contracts/example/Example.sol
 	// Deposit(address,string,uint256) event signature
 	DepositEventSignature = "0x2d4b597935f3cd67fb2eebf1db4debc934cee5c7baa7153f980fdbeb2e74084e"
 	// Swap(address,string,string,uint256) event signature
@@ -74,7 +87,7 @@ func (st *StateTransition) ProcessBlock(
 		return nil, err
 	}
 
-	if AppchainContractAddress != "" {
+	if ExampleContractAddress != "" {
 		for _, r := range receipts {
 			extTxs := st.processReceipt(tx, r, b.ChainID)
 			if len(extTxs) > 0 {
@@ -99,8 +112,8 @@ func (st *StateTransition) ProcessBlock(
 func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID uint64) []apptypes.ExternalTransaction {
 	var externalTxs []apptypes.ExternalTransaction
 	for _, vlog := range r.Logs {
-		// Check if this log is from our appchain contract
-		if vlog.Address == common.HexToAddress(AppchainContractAddress) && len(vlog.Topics) >= 2 {
+		// Check if this log is from our example contract
+		if vlog.Address == common.HexToAddress(ExampleContractAddress) && len(vlog.Topics) >= 2 {
 			switch vlog.Topics[0].Hex() {
 			case DepositEventSignature:
 				// Decode deposit event using ABI
@@ -170,7 +183,7 @@ func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID u
 				// Create an external transaction record for the destination chain
 				extTx := apptypes.ExternalTransaction{
 					ChainID: gosdk.EthereumSepoliaChainID, // Destination chain
-					Tx:      createTokenTransferPayload(userAddr, amountOut, tokenOut),
+					Tx:      createTokenMintPayload(userAddr, amountOut, tokenOut),
 				}
 
 				externalTxs = append(externalTxs, extTx)
@@ -217,15 +230,16 @@ func calculateSwapOutput(tokenIn, tokenOut string, amountIn *big.Int) *big.Int {
 	return outputInt
 }
 
-// This is specific to how your external chain contract expects data
-// here we assume a simple payload structure for demonstration
-func createTokenTransferPayload(recipient common.Address, amount *big.Int, token string) []byte {
-	payload := make([]byte, 1+20+32+len(token))
-	payload[0] = 1
-	copy(payload[1:21], recipient.Bytes())
+// createTokenMintPayload creates a payload for the AppChain contract
+// This matches the demo contracts in 0xAtelerix/sdk/contracts/pelacli/AppChain.sol
+// Payload format: [recipient:20bytes][amount:32bytes][tokenName:variable]
+// The AppChain contract will mint these tokens to the recipient address
+func createTokenMintPayload(recipient common.Address, amount *big.Int, token string) []byte {
+	payload := make([]byte, 20+32+len(token))
+	copy(payload[0:20], recipient.Bytes())
 	amountBytes := amount.Bytes()
-	copy(payload[53-len(amountBytes):53], amountBytes)
-	copy(payload[53:], []byte(token))
+	copy(payload[52-len(amountBytes):52], amountBytes)
+	copy(payload[52:], []byte(token))
 
 	return payload
 }
