@@ -26,16 +26,14 @@ import (
 const ChainID = 42
 
 type RuntimeArgs struct {
-	EmitterPort        string
-	AppchainDBPath     string
-	EventStreamDir     string
-	TxStreamDir        string
-	LocalDBPath        string
-	EthereumBlocksPath string
-	SolBlocksPath      string
-	RPCPort            string
-	MutlichainConfig   gosdk.MultichainConfig
-	LogLevel           zerolog.Level
+	EmitterPort      string
+	AppchainDBPath   string
+	EventStreamDir   string
+	TxStreamDir      string
+	LocalDBPath      string
+	RPCPort          string
+	MutlichainConfig gosdk.MultichainConfig
+	LogLevel         zerolog.Level
 }
 
 func main() {
@@ -58,8 +56,6 @@ func RunCLI(ctx context.Context) {
 	txDir := fs.String("tx-dir", config.TxStreamDir, "Transaction stream directory")
 
 	localDBPath := fs.String("local-db-path", "./localdb", "Path to local DB")
-	ethereumBlocksPath := fs.String("ethdb", "", "read only eth blocks db")
-	solBlocksPath := fs.String("soldb", "", "read only sol blocks db")
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
 	multichainConfigJSON := fs.String("multichain-config", "", "Multichain config JSON path")
 	logLevel := fs.Int("log-level", int(zerolog.InfoLevel), "Logging level")
@@ -87,16 +83,14 @@ func RunCLI(ctx context.Context) {
 	}
 
 	args := RuntimeArgs{
-		EmitterPort:        *emitterPort,
-		AppchainDBPath:     *appchainDBPath,
-		EventStreamDir:     *streamDir,
-		TxStreamDir:        *txDir,
-		LocalDBPath:        *localDBPath,
-		EthereumBlocksPath: *ethereumBlocksPath,
-		SolBlocksPath:      *solBlocksPath,
-		RPCPort:            *rpcPort,
-		LogLevel:           zerolog.Level(*logLevel),
-		MutlichainConfig:   mcDbs,
+		EmitterPort:      *emitterPort,
+		AppchainDBPath:   *appchainDBPath,
+		EventStreamDir:   *streamDir,
+		TxStreamDir:      *txDir,
+		LocalDBPath:      *localDBPath,
+		RPCPort:          *rpcPort,
+		LogLevel:         zerolog.Level(*logLevel),
+		MutlichainConfig: mcDbs,
 	}
 
 	Run(ctx, args, nil)
