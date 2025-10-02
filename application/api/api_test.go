@@ -62,7 +62,7 @@ func TestCustomRPC_GetBalance(t *testing.T) {
 	ctx := context.Background()
 
 	// Create RPC server and custom RPC
-	rpcServer := rpc.NewStandardRPCServer()
+	rpcServer := rpc.NewStandardRPCServer(nil)
 	customRPC := NewCustomRPC(rpcServer, db)
 	customRPC.AddRPCMethods()
 
@@ -171,7 +171,7 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 		localDB,
 	)
 
-	rpcServer := rpc.NewStandardRPCServer()
+	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, nil, txPool)
 
 	rpcAddress := "http://127.0.0.1:18545/rpc"
@@ -217,7 +217,7 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 
 func TestCustomRPC_GetBalance_NilDatabase(t *testing.T) {
 	// Test with nil database
-	rpcServer := rpc.NewStandardRPCServer()
+	rpcServer := rpc.NewStandardRPCServer(nil)
 	customRPC := NewCustomRPC(rpcServer, nil)
 
 	params := []any{
@@ -255,7 +255,7 @@ func TestDefaultRPC_MethodRegistration(t *testing.T) {
 	)
 
 	// Create RPC server and add standard methods
-	rpcServer := rpc.NewStandardRPCServer()
+	rpcServer := rpc.NewStandardRPCServer(nil)
 
 	// Test that AddStandardMethods doesn't panic (even with minimal setup)
 	require.NotPanics(t, func() {

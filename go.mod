@@ -3,7 +3,7 @@ module github.com/0xAtelerix/example
 go 1.25.0
 
 require (
-	github.com/0xAtelerix/sdk v0.1.1
+	github.com/0xAtelerix/sdk v0.1.2
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/ledgerwatch/erigon-lib v1.0.0
