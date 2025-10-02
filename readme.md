@@ -3,6 +3,22 @@
 > This repo is a **skeleton** for building your own appchain on top of the Pelagos Go SDK.
 > It comes with a runnable **docker-compose** stack that includes both your appchain node and a **consensus** (`pelacli`) that simulates consensus in your local environment and feeds external chain data.
 
+## Table of Contents
+
+- [What you get out of the box](#what-you-get-out-of-the-box)
+- [Key concepts & execution model](#key-concepts--execution-model)
+- [Project layout](#project-layout)
+- [Docker — compose stack](#docker--compose-stack)
+- [Configuration files](#configuration-files)
+  - [consensus_chains.json](#configconsensus_chainsjson-used-by-pelacli-for-reading-from-external-chains)
+  - [chain_data.json](#configchain_datajson-used-by-appchain-for-reading-external-chain-data)
+  - [ext_networks.json](#configext_networksjson-used-by-pelacli-for-writing-to-external-chains)
+- [Build & Run](#build--run)
+- [JSON-RPC quickstart](#json-rpc-quickstart)
+- [Code walkthrough (where to extend)](#code-walkthrough-where-to-extend)
+- [Flags (quick reference)](#flags-quick-reference)
+- [Additional Resources](#additional-resources)
+
 ## What you get out of the box
 
 * A minimal **block type** (`Block`) that satisfies `apptypes.AppchainBlock` from the SDK.
