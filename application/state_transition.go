@@ -37,22 +37,15 @@ const (
 	SwapEventSignature = "0x363ba239c72b81c4726aba8829ad4df22628bf7d09efc5f7a18063a53ec1c4ba"
 
 	// ABI definitions for event decoding
-	depositEventABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"token","type":"string"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"Deposit","type":"event"}]`
+	depositEventABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address",` +
+		`"name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"token",` +
+		`"type":"string"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],` +
+		`"name":"Deposit","type":"event"}]`
 
-	swapEventABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"tokenIn","type":"string"},{"indexed":false,"internalType":"string","name":"tokenOut","type":"string"},{"indexed":false,"internalType":"uint256","name":"amountIn","type":"uint256"}],"name":"Swap","type":"event"}]`
-)
-
-var (
-	// Fixed exchange rates for token pairs (tokenIn:tokenOut -> rate)
-	// Rate represents how many tokenOut you get for 1 tokenIn
-	exchangeRates = map[string]float64{
-		"ETH:USDT": 4200.0,
-		"USDT:ETH": 1.0 / 4200.0,
-		"BTC:USDT": 60000.0,
-		"USDT:BTC": 1.0 / 60000.0,
-		"ETH:BTC":  0.07,
-		"BTC:ETH":  1.0 / 0.07,
-	}
+	swapEventABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address",` +
+		`"name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"tokenIn",` +
+		`"type":"string"},{"indexed":false,"internalType":"string","name":"tokenOut","type":"string"},` +
+		`{"indexed":false,"internalType":"uint256","name":"amountIn","type":"uint256"}],"name":"Swap","type":"event"}]`
 )
 
 var (
@@ -109,8 +102,13 @@ func (st *StateTransition) ProcessBlock(
 
 // processReceipt handles Deposit events from the external chain
 // Just for example, In real use-case, handle according to your logic
-func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID uint64) []apptypes.ExternalTransaction {
+func (*StateTransition) processReceipt(
+	tx kv.RwTx,
+	r types.Receipt,
+	chainID uint64,
+) []apptypes.ExternalTransaction {
 	var externalTxs []apptypes.ExternalTransaction
+
 	for _, vlog := range r.Logs {
 		// Check if this log is from our example contract
 		if vlog.Address == common.HexToAddress(ExampleContractAddress) && len(vlog.Topics) >= 2 {
@@ -120,6 +118,7 @@ func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID u
 				token, amount, err := decodeDepositEvent(vlog)
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to decode deposit event")
+
 					continue
 				}
 
@@ -131,6 +130,7 @@ func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID u
 				amountUint256, overflow := uint256.FromBig(amount)
 				if overflow {
 					log.Error().Str("amount", amount.String()).Msg("Deposit amount too large")
+
 					continue
 				}
 
@@ -141,6 +141,7 @@ func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID u
 				currentBalanceData, err := tx.GetOne(AccountsBucket, accountKey)
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to get current balance")
+
 					continue
 				}
 
@@ -156,6 +157,7 @@ func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID u
 				balanceBytes := newBalance.Bytes()
 				if err := tx.Put(AccountsBucket, accountKey, balanceBytes); err != nil {
 					log.Error().Err(err).Msg("Failed to update balance")
+
 					continue
 				}
 
@@ -172,6 +174,7 @@ func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID u
 				tokenIn, tokenOut, amountIn, err := decodeSwapEvent(vlog)
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to decode swap event")
+
 					continue
 				}
 
@@ -202,17 +205,28 @@ func (st *StateTransition) processReceipt(tx kv.RwTx, r types.Receipt, chainID u
 				log.Info().Msgf("Unhandled event signature: %s", vlog.Topics[0].Hex())
 			}
 		}
-
 	}
+
 	return externalTxs
 }
 
 // calculateSwapOutput calculates the output amount for a token swap using fixed exchange rates
 func calculateSwapOutput(tokenIn, tokenOut string, amountIn *big.Int) *big.Int {
+	// Fixed exchange rates for token pairs (tokenIn:tokenOut -> rate)
+	// Rate represents how many tokenOut you get for 1 tokenIn
+	exchangeRates := map[string]float64{
+		"ETH:USDT": 4200.0,
+		"USDT:ETH": 1.0 / 4200.0,
+		"BTC:USDT": 60000.0,
+		"USDT:BTC": 1.0 / 60000.0,
+	}
+
 	pair := tokenIn + ":" + tokenOut
+
 	rate, exists := exchangeRates[pair]
 	if !exists {
 		log.Warn().Str("pair", pair).Msg("Exchange rate not found, using 1:1 rate")
+
 		return amountIn // Default to 1:1 if rate not found
 	}
 
@@ -267,7 +281,7 @@ func decodeDepositEvent(vlog *types.Log) (string, *big.Int, error) {
 }
 
 // decodeSwapEvent decodes a Swap event using ABI
-func decodeSwapEvent(vlog *types.Log) (string, string, *big.Int, error) {
+func decodeSwapEvent(vlog *types.Log) (tokenIn, tokenOut string, amountIn *big.Int, err error) {
 	// Parse the ABI
 	parsedABI, err := abi.JSON(strings.NewReader(swapEventABI))
 	if err != nil {
@@ -286,5 +300,9 @@ func decodeSwapEvent(vlog *types.Log) (string, string, *big.Int, error) {
 		return "", "", nil, err
 	}
 
-	return swapEvent.TokenIn, swapEvent.TokenOut, swapEvent.AmountIn, nil
+	tokenIn = swapEvent.TokenIn
+	tokenOut = swapEvent.TokenOut
+	amountIn = swapEvent.AmountIn
+
+	return
 }
