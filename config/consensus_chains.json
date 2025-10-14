@@ -3,6 +3,12 @@
     "ChainID": 80002,
     "DBPath": "/multichain/amoy",
     "APIKey": "{YOUR AMOY WSS URL}",
-    "StartBlock": 27182300
+    "StartBlock": 27701526
+  },
+  {
+    "ChainID": 123231,
+    "DBPath": "/multichain/solana-devnet",
+    "APIKey": "https://api.devnet.solana.com",
+    "StartBlock": 414579298
   }
 ]
