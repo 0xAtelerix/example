@@ -99,6 +99,8 @@ func RunCLI(ctx context.Context) {
 func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(args.LogLevel)
 
+	ctx = log.With().Logger().WithContext(ctx)
+
 	// Cancel on SIGINT/SIGTERM too (centralized; no per-runner signal goroutines needed)
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -109,6 +111,7 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 	config.AppchainDBPath = args.AppchainDBPath
 	config.EventStreamDir = args.EventStreamDir
 	config.TxStreamDir = args.TxStreamDir
+	config.Logger = &log.Logger
 
 	chainDBs, err := gosdk.NewMultichainStateAccessDB(args.MutlichainConfig)
 	if err != nil {
@@ -233,8 +236,6 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 
 	// Add custom RPC methods - Optional
 	api.NewCustomRPC(rpcServer, appchainDB).AddRPCMethods()
-
-	log.Info().Msg("Starting RPC server on :" + args.RPCPort)
 
 	if err := rpcServer.StartHTTPServer(ctx, args.RPCPort); err != nil {
 		log.Fatal().Err(err).Msg("Failed to start RPC server")

@@ -7,6 +7,7 @@ import (
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
+	"github.com/0xAtelerix/sdk/gosdk/external"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -27,7 +28,7 @@ const (
 	// 4. Update signature or ABI if your contract events differ
 	//
 	// This is a demo address on Polygon-Amoy testnet.
-	ExampleContractAddress = "0x102a91394927a2b44020f72cF96162142c242DA4"
+	ExampleContractAddress = "0x8D350d5351A936Ef3e2907C0a438Fc941DAE3bfd"
 
 	// Event signatures for the Example contract events
 	// These correspond to events in 0xAtelerix/sdk/contracts/example/Example.sol
@@ -35,6 +36,9 @@ const (
 	DepositEventSignature = "0x2d4b597935f3cd67fb2eebf1db4debc934cee5c7baa7153f980fdbeb2e74084e"
 	// Swap(address,string,string,uint256) event signature
 	SwapEventSignature = "0x363ba239c72b81c4726aba8829ad4df22628bf7d09efc5f7a18063a53ec1c4ba"
+	// WithdrawToSolana(uint256) event signature
+	// This event triggers a cross-chain transfer from EVM to Solana
+	WithdrawToSolanaSignature = "0x245ecbfbddf346446b302f2dc8237ed1144f6f9407cb9708e2d0734458c72950"
 
 	// ABI definitions for event decoding
 	depositEventABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address",` +
@@ -46,6 +50,10 @@ const (
 		`"name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"tokenIn",` +
 		`"type":"string"},{"indexed":false,"internalType":"string","name":"tokenOut","type":"string"},` +
 		`{"indexed":false,"internalType":"uint256","name":"amountIn","type":"uint256"}],"name":"Swap","type":"event"}]`
+
+	withdrawToSolanaABI = `[{"anonymous":false,"inputs":[` +
+		`{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],` +
+		`"name":"WithdrawToSolana","type":"event"}]`
 )
 
 var (
@@ -68,6 +76,42 @@ func (st *StateTransition) ProcessBlock(
 	b apptypes.ExternalBlock,
 	tx kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {
+	switch {
+	case gosdk.IsEvmChain(apptypes.ChainType(b.ChainID)):
+		return st.processEVMBlock(b, tx)
+	case gosdk.IsSolanaChain(apptypes.ChainType(b.ChainID)):
+		return st.processSolanaBlock(b, tx)
+	default:
+		log.Warn().Uint64("chainID", b.ChainID).Msg("Unsupported external chain, skipping...")
+	}
+
+	return nil, nil
+}
+
+func (st *StateTransition) processSolanaBlock(
+	b apptypes.ExternalBlock,
+	_ kv.RwTx,
+) ([]apptypes.ExternalTransaction, error) {
+	var externalTxs []apptypes.ExternalTransaction
+
+	solBlock, err := st.msa.SolanaBlock(context.Background(), b)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info().
+		Uint64("chainID", b.ChainID).
+		Uint64("slotNumber", b.BlockNumber).
+		Int("transactions", len(solBlock.Transactions)).
+		Msg("Solana External block")
+
+	return externalTxs, nil
+}
+
+func (st *StateTransition) processEVMBlock(
+	b apptypes.ExternalBlock,
+	dbtx kv.RwTx,
+) ([]apptypes.ExternalTransaction, error) {
 	var externalTxs []apptypes.ExternalTransaction
 
 	block, err := st.msa.EthBlock(context.Background(), b)
@@ -80,22 +124,19 @@ func (st *StateTransition) ProcessBlock(
 		return nil, err
 	}
 
-	if ExampleContractAddress != "" {
-		for _, r := range receipts {
-			extTxs := st.processReceipt(tx, r, b.ChainID)
-			if len(extTxs) > 0 {
-				externalTxs = append(externalTxs, extTxs...)
-			}
+	for _, r := range receipts {
+		extTxs := st.processReceipt(dbtx, r, b.ChainID)
+		if len(extTxs) > 0 {
+			externalTxs = append(externalTxs, extTxs...)
 		}
 	}
 
 	log.Info().
 		Uint64("chainID", b.ChainID).
-		Uint64("n", block.Header.Number.Uint64()).
-		Str("hash", block.Header.Hash().String()).
+		Uint64("blockNumber", b.BlockNumber).
 		Int("transactions", len(block.Body.Transactions)).
 		Int("receipts", len(receipts)).
-		Msg("External block")
+		Msg("EVM External block")
 
 	return externalTxs, nil
 }
@@ -111,7 +152,7 @@ func (*StateTransition) processReceipt(
 
 	for _, vlog := range r.Logs {
 		// Check if this log is from our example contract
-		if vlog.Address == common.HexToAddress(ExampleContractAddress) && len(vlog.Topics) >= 2 {
+		if vlog.Address == common.HexToAddress(ExampleContractAddress) && len(vlog.Topics) > 0 {
 			switch vlog.Topics[0].Hex() {
 			case DepositEventSignature:
 				// Decode deposit event using ABI
@@ -183,10 +224,15 @@ func (*StateTransition) processReceipt(
 				// Calculate output amount using fixed exchange rate
 				amountOut := calculateSwapOutput(tokenIn, tokenOut, amountIn)
 
-				// Create an external transaction record for the destination chain
-				extTx := apptypes.ExternalTransaction{
-					ChainID: gosdk.EthereumSepoliaChainID, // Destination chain
-					Tx:      createTokenMintPayload(userAddr, amountOut, tokenOut),
+				// Create an external transaction record for the destination chain (EVM)
+				extTx, err := external.NewExTxBuilder(
+					createTokenMintPayload(userAddr, amountOut, tokenOut),
+					gosdk.EthereumSepoliaChainID).
+					Build()
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to create external transaction for swap event")
+
+					continue
 				}
 
 				externalTxs = append(externalTxs, extTx)
@@ -199,7 +245,32 @@ func (*StateTransition) processReceipt(
 					Str("amountIn", amountIn.String()).
 					Str("amountOut", amountOut.String()).
 					Uint64("target_chainID", uint64(gosdk.EthereumSepoliaChainID)).
-					Msg("Processed swap event from external chain")
+					Msg("Processed swap event - EVM to EVM")
+
+			case WithdrawToSolanaSignature:
+				// Decode withdraw to Solana event using ABI
+				amount, err := decodeWithdrawToSolanaEvent(vlog)
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to decode WithdrawToSolana event")
+
+					continue
+				}
+
+				// Create Solana mint payload for cross-chain transfer
+				extTx, err := createSolanaMintPayload(amount.Uint64())
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to create Solana mint payload")
+
+					continue
+				}
+
+				externalTxs = append(externalTxs, extTx)
+
+				log.Info().
+					Uint64("source_chainID", chainID).
+					Str("amount", amount.String()).
+					Uint64("target_chainID", uint64(gosdk.SolanaDevnetChainID)).
+					Msg("Processed withdraw to Solana event - EVM to Solana withdraw")
 
 			default:
 				log.Info().Msgf("Unhandled event signature: %s", vlog.Topics[0].Hex())
@@ -303,6 +374,31 @@ func decodeSwapEvent(vlog *types.Log) (tokenIn, tokenOut string, amountIn *big.I
 	tokenIn = swapEvent.TokenIn
 	tokenOut = swapEvent.TokenOut
 	amountIn = swapEvent.AmountIn
+
+	return
+}
+
+// decodeWithdrawToSolanaEvent decodes a WithdrawToSolana event using ABI
+func decodeWithdrawToSolanaEvent(
+	vlog *types.Log,
+) (amount *big.Int, err error) {
+	// Parse the ABI
+	parsedABI, err := abi.JSON(strings.NewReader(withdrawToSolanaABI))
+	if err != nil {
+		return nil, err
+	}
+
+	// Unpack the event data (non-indexed parameters)
+	var withdrawEvent struct {
+		Amount *big.Int
+	}
+
+	err = parsedABI.UnpackIntoInterface(&withdrawEvent, "WithdrawToSolana", vlog.Data)
+	if err != nil {
+		return nil, err
+	}
+
+	amount = withdrawEvent.Amount
 
 	return
 }

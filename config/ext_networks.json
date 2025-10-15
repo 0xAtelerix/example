@@ -2,8 +2,14 @@
   {
     "chainId": 11155111,
     "rpcUrl": "<YOUR SEPOLIA RPC URL>",
-    "contractAddress": "<PELAGOS CONTRACT ADDRESS ON SEPOLIA",
-    "privateKey": "<PRIVATE KEY WITH FUNDS AND ACCESS TO PELAGOS CONTRACT"
+    "contractAddress": "<PELAGOS CONTRACT ADDRESS ON SEPOLIA>",
+    "privateKey": "<PRIVATE KEY WITH FUNDS AND ACCESS TO PELAGOS CONTRACT>"
+  },
+  {
+    "chainId": 123231,
+    "rpcUrl": "https://api.devnet.solana.com",
+    "contractAddress": "<YOUR PELAGOS PROGRAM ADDRESS>",
+    "privateKey": "<PRIVATE KEY WITH FUNDS AND SIGNER ACCESS FOR PELAGOS PROGRAM>"
   }
 ]
 

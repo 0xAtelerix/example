@@ -3,7 +3,9 @@ module github.com/0xAtelerix/example
 go 1.25.0
 
 require (
-	github.com/0xAtelerix/sdk v0.1.2
+	github.com/0xAtelerix/sdk v0.1.3
+	github.com/blocto/solana-go-sdk v1.30.0
+	github.com/ethereum/go-ethereum v1.16.3
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/ledgerwatch/erigon-lib v1.0.0
@@ -17,7 +19,6 @@ require (
 	github.com/VictoriaMetrics/metrics v1.40.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.0 // indirect
-	github.com/blocto/solana-go-sdk v1.30.0 // indirect
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/consensys/gnark-crypto v0.19.0 // indirect
@@ -27,7 +28,6 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/erigontech/mdbx-go v0.27.14 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.4 // indirect
-	github.com/ethereum/go-ethereum v1.16.3 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
