@@ -1,7 +1,10 @@
 package application
 
 import (
+	"crypto/rand"
+
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
+	"github.com/fxamacker/cbor/v2"
 )
 
 var _ apptypes.AppchainBlock = &Block{}
@@ -9,9 +12,9 @@ var _ apptypes.AppchainBlock = &Block{}
 // step 3:
 // How do your block look like
 type Block struct {
-	BlockNum     uint64                         `json:"number"`
-	Root         [32]byte                       `json:"root"`
-	Transactions []apptypes.ExternalTransaction `json:"transactions"`
+	BlockNum     uint64                        `json:"number"    cbor:"1,keyasint"`
+	Root         [32]byte                       `json:"root"     cbor:"2,keyasint"`
+	//Transactions []apptypes.ExternalTransaction `json:"transactions"`
 }
 
 func (b *Block) Number() uint64 {
@@ -26,8 +29,9 @@ func (b *Block) StateRoot() [32]byte {
 	return b.Root
 }
 
-func (*Block) Bytes() []byte {
-	return []byte{}
+func (b *Block) Bytes() []byte {
+	data, _ := cbor.Marshal(b)
+	return data
 }
 
 func BlockConstructor(
@@ -41,3 +45,13 @@ func BlockConstructor(
 		Root:     stateRoot,
 	}
 }
+
+func RandBytes(length int) []byte {
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err)
+	}
+
+	return buf
+}
+

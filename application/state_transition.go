@@ -225,9 +225,9 @@ func (*StateTransition) processReceipt(
 				amountOut := calculateSwapOutput(tokenIn, tokenOut, amountIn)
 
 				// Create an external transaction record for the destination chain (EVM)
-				extTx, err := external.NewExTxBuilder(
-					createTokenMintPayload(userAddr, amountOut, tokenOut),
-					gosdk.EthereumSepoliaChainID).
+				extTx, err := external.NewExTxBuilder().
+					EthereumSepolia().
+					SetPayload(createTokenMintPayload(userAddr, amountOut, tokenOut)).
 					Build()
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to create external transaction for swap event")

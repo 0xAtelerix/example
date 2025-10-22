@@ -232,7 +232,7 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 	rpcServer.AddMiddleware(api.NewExampleMiddleware(log.Logger))
 
 	// Add standard RPC methods - Refer RPC readme in sdk for details
-	rpc.AddStandardMethods(rpcServer, appchainDB, txPool)
+	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, application.Block{})
 
 	// Add custom RPC methods - Optional
 	api.NewCustomRPC(rpcServer, appchainDB).AddRPCMethods()

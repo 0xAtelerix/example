@@ -1,15 +1,20 @@
 package api
 
 import (
+	"fmt"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/0xAtelerix/sdk/gosdk"
+	"github.com/0xAtelerix/sdk/gosdk/appblock"
 	"github.com/0xAtelerix/sdk/gosdk/rpc"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
 	"github.com/holiman/uint256"
@@ -172,7 +177,7 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 	)
 
 	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(rpcServer, nil, txPool)
+	rpc.AddStandardMethods(rpcServer, nil, txPool, application.Block{})
 
 	rpcAddress := "http://127.0.0.1:18545/rpc"
 
@@ -259,7 +264,7 @@ func TestDefaultRPC_MethodRegistration(t *testing.T) {
 
 	// Test that AddStandardMethods doesn't panic (even with minimal setup)
 	require.NotPanics(t, func() {
-		rpc.AddStandardMethods(rpcServer, nil, txPool)
+		rpc.AddStandardMethods(rpcServer, nil, txPool, application.Block{})
 	})
 }
 
@@ -292,3 +297,103 @@ func sendJSONRPCRequest(rpcAddress string, jsonReq string) (string, error) {
 
 	return string(body), nil
 }
+
+func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "appblockdb")
+
+	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(dbPath).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{
+				gosdk.BlocksBucket: {},
+			}
+		}).
+		Open()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		appchainDB.Close()
+	})
+
+	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(t.TempDir()).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return txpool.Tables()
+		}).
+		Open()
+	require.NoError(t, err)
+
+	defer localDB.Close()
+
+	// Create txpool
+	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
+		localDB,
+	)
+
+	var root [32]byte
+	copy(root[:], []byte("example-root-hash-0000000000000000"))
+
+	block := &application.Block{
+		BlockNum: 42,
+		Root:     root,
+	}
+
+	require.NoError(t, appblock.StoreAppBlock(ctx, appchainDB, block.BlockNum, block))
+
+	rpcServer := rpc.NewStandardRPCServer(nil)
+	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
+
+	rpcAddress := "http://127.0.0.1:18545/rpc"
+
+	errServer := make(chan error, 1)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		wg.Done()
+
+		errServer <- rpcServer.StartHTTPServer(t.Context(), ":18545")
+	}()
+
+	select {
+	case serverErr := <-errServer:
+		if serverErr != nil {
+			t.Fatalf("Failed to start HTTP server: %v", serverErr)
+		}
+	default:
+		// continue
+		wg.Wait()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	
+	jsonReq := fmt.Sprintf(
+		`{"jsonrpc":"2.0","method":"getAppBlock","params":[%d,{"number":0,"root":[0]}],"id":1}`,
+		block.BlockNum,
+	)
+
+	respBody, err := sendJSONRPCRequest(rpcAddress, jsonReq)
+	require.NoError(t, err)
+
+	var rpcResp rpc.JSONRPCResponse
+	require.NoError(t, json.Unmarshal([]byte(respBody), &rpcResp))
+	require.Nil(t, rpcResp.Error)
+
+	payload, err := json.Marshal(rpcResp.Result)
+	require.NoError(t, err)
+
+	var fv appblock.FieldsValues
+	require.NoError(t, json.Unmarshal(payload, &fv))
+
+	require.Len(t, fv.Fields, 2)
+	require.Len(t, fv.Values, 2)
+
+	fieldValues := make(map[string]string, len(fv.Fields))
+	for i := range fv.Fields {
+		fieldValues[fv.Fields[i]] = fv.Values[i]
+	}
+
+	require.Equal(t, "42", fieldValues["number"])
+	require.Equal(t, fmt.Sprintf("%v", block.Root), fieldValues["root"])
+}
+

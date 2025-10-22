@@ -2,13 +2,12 @@ package application
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 
-	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/0xAtelerix/sdk/gosdk/external"
 	"github.com/blocto/solana-go-sdk/common"
-	"github.com/blocto/solana-go-sdk/types"
 )
 
 // NOTE: This implementation is specific to the Solana programs in gosdk/solana-programs deployed on Devnet
@@ -81,35 +80,40 @@ func deriveMintAuthorityPDA(programID string) (string, uint8) {
 // - PDA derivation logic (if using different seeds)
 // - Access control and signing requirements
 func createSolanaMintPayload(amount uint64) (apptypes.ExternalTransaction, error) {
-	// Build Solana mint payload
-	appchainProg := types.AccountMeta{
-		PubKey:     common.PublicKeyFromString(AppchainProgIDStr),
-		IsSigner:   false,
-		IsWritable: false,
-	}
-	mintAcc := types.AccountMeta{
-		PubKey:     common.PublicKeyFromString(MintPubkeyStr),
-		IsSigner:   false,
-		IsWritable: true, // Mint authority writable
-	}
-	ataAcc := types.AccountMeta{
-		PubKey:     common.PublicKeyFromString(deriveATA(MintPubkeyStr, XUserPubkeyStr)),
-		IsSigner:   false,
-		IsWritable: true, // Recipient ATA
+	type solanaAccount struct {
+		PubKey     string `json:"pubkey"`
+		IsSigner   bool   `json:"isSigner"`
+		IsWritable bool   `json:"isWritable"`
 	}
 
-	// Add mint authority PDA (4th specific account)
 	authorityPDA, _ := deriveMintAuthorityPDA(AppchainProgIDStr)
-	authorityAcc := types.AccountMeta{
-		PubKey:     common.PublicKeyFromString(authorityPDA),
-		IsSigner:   false, // Signed via seeds in appchain
-		IsWritable: false,
-	}
 
-	tokenProg := types.AccountMeta{
-		PubKey:     common.PublicKeyFromString(TokenProgID),
-		IsSigner:   false,
-		IsWritable: false,
+	accounts := []solanaAccount{
+		{
+			PubKey:     AppchainProgIDStr,
+			IsSigner:   false,
+			IsWritable: false,
+		},
+		{
+			PubKey:     MintPubkeyStr,
+			IsSigner:   false,
+			IsWritable: true,
+		},
+		{
+			PubKey:     deriveATA(MintPubkeyStr, XUserPubkeyStr),
+			IsSigner:   false,
+			IsWritable: true,
+		},
+		{
+			PubKey:     authorityPDA,
+			IsSigner:   false,
+			IsWritable: false,
+		},
+		{
+			PubKey:     TokenProgID,
+			IsSigner:   false,
+			IsWritable: false,
+		},
 	}
 
 	// Appchain-specific data: recipient (32 bytes) + amount (8 bytes)
@@ -125,11 +129,22 @@ func createSolanaMintPayload(amount uint64) (apptypes.ExternalTransaction, error
 	binary.LittleEndian.PutUint64(amountBytes, amount)
 	appchainData = append(appchainData, amountBytes...)
 
-	// Build account list: appchainProg first, then specifics (mint, ata, authority, token)
-	// Total: 5 accounts will be passed to appchain after CPI
-	// In appchain: [0]=program, [1]=mint, [2]=ata, [3]=authority, [4]=token
-	exTx, err := external.NewExTxBuilder(appchainData, gosdk.SolanaDevnetChainID).
-		AddSolanaAccounts([]types.AccountMeta{appchainProg, mintAcc, ataAcc, authorityAcc, tokenProg}).
+	payload := struct {
+		Accounts []solanaAccount `json:"accounts"`
+		Data     []byte          `json:"data"`
+	}{
+		Accounts: accounts,
+		Data:     appchainData,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return apptypes.ExternalTransaction{}, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	exTx, err := external.NewExTxBuilder().
+		SolanaDevnet().
+		SetPayload(payloadBytes).
 		Build()
 	if err != nil {
 		return apptypes.ExternalTransaction{}, fmt.Errorf("build payload: %w", err)
