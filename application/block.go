@@ -9,12 +9,13 @@ import (
 
 var _ apptypes.AppchainBlock = &Block{}
 
-// step 3:
-// How do your block look like
+// Block represents an application block stored in the appchain state.
 type Block struct {
-	BlockNum     uint64                        `json:"number"    cbor:"1,keyasint"`
-	Root         [32]byte                       `json:"root"     cbor:"2,keyasint"`
-	//Transactions []apptypes.ExternalTransaction `json:"transactions"`
+	BlockNum uint64   `json:"number" cbor:"1,keyasint"`
+	Root     [32]byte `json:"root"   cbor:"2,keyasint"`
+	// Transactions []apptypes.ExternalTransaction `json:"transactions"`.
+	// or
+	// Transactions []apptypes.AppTransaction`json:"transactions"`. or?
 }
 
 func (b *Block) Number() uint64 {
@@ -31,6 +32,7 @@ func (b *Block) StateRoot() [32]byte {
 
 func (b *Block) Bytes() []byte {
 	data, _ := cbor.Marshal(b)
+
 	return data
 }
 
@@ -46,6 +48,7 @@ func BlockConstructor(
 	}
 }
 
+// RandBytes returns a slice filled with cryptographically secure random bytes.
 func RandBytes(length int) []byte {
 	buf := make([]byte, length)
 	if _, err := rand.Read(buf); err != nil {
@@ -54,4 +57,3 @@ func RandBytes(length int) []byte {
 
 	return buf
 }
-

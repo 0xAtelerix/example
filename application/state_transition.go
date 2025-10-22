@@ -30,14 +30,12 @@ const (
 	// This is a demo address on Polygon-Amoy testnet.
 	ExampleContractAddress = "0x8D350d5351A936Ef3e2907C0a438Fc941DAE3bfd"
 
-	// Event signatures for the Example contract events
-	// These correspond to events in 0xAtelerix/sdk/contracts/example/Example.sol
-	// Deposit(address,string,uint256) event signature
+	// DepositEventSignature is the signature for Deposit(address,string,uint256).
 	DepositEventSignature = "0x2d4b597935f3cd67fb2eebf1db4debc934cee5c7baa7153f980fdbeb2e74084e"
-	// Swap(address,string,string,uint256) event signature
+	// SwapEventSignature is the signature for Swap(address,string,string,uint256).
 	SwapEventSignature = "0x363ba239c72b81c4726aba8829ad4df22628bf7d09efc5f7a18063a53ec1c4ba"
-	// WithdrawToSolana(uint256) event signature
-	// This event triggers a cross-chain transfer from EVM to Solana
+	// WithdrawToSolanaSignature is the signature for WithdrawToSolana(uint256).
+	// This event triggers a cross-chain transfer from EVM to Solana.
 	WithdrawToSolanaSignature = "0x245ecbfbddf346446b302f2dc8237ed1144f6f9407cb9708e2d0734458c72950"
 
 	// ABI definitions for event decoding
@@ -71,7 +69,7 @@ func NewStateTransition(msa *gosdk.MultichainStateAccess) *StateTransition {
 	}
 }
 
-// how to external chains blocks
+// ProcessBlock handles external chain blocks and dispatches them to chain-specific logic.
 func (st *StateTransition) ProcessBlock(
 	b apptypes.ExternalBlock,
 	tx kv.RwTx,
@@ -375,7 +373,7 @@ func decodeSwapEvent(vlog *types.Log) (tokenIn, tokenOut string, amountIn *big.I
 	tokenOut = swapEvent.TokenOut
 	amountIn = swapEvent.AmountIn
 
-	return
+	return tokenIn, tokenOut, amountIn, err
 }
 
 // decodeWithdrawToSolanaEvent decodes a WithdrawToSolana event using ABI
@@ -400,5 +398,5 @@ func decodeWithdrawToSolanaEvent(
 
 	amount = withdrawEvent.Amount
 
-	return
+	return amount, err
 }

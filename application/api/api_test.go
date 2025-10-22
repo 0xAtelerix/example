@@ -1,15 +1,14 @@
 package api
 
 import (
-	"fmt"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/0xAtelerix/example/application"
+)
+
+const (
+	defaultRPCAddress = "http://127.0.0.1:18545/rpc"
+	defaultRPCListen  = ":18545"
 )
 
 // createTempDBWithBalance creates a temporary in-memory database with test balance data
@@ -179,17 +183,24 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, nil, txPool, application.Block{})
 
-	rpcAddress := "http://127.0.0.1:18545/rpc"
-
 	errServer := make(chan error, 1)
-	wg := sync.WaitGroup{}
-	wg.Add(1)
+	ready := make(chan struct{})
 
 	go func() {
-		wg.Done()
+		close(ready)
 
-		errServer <- rpcServer.StartHTTPServer(t.Context(), ":18545")
+		errServer <- rpcServer.StartHTTPServer(t.Context(), defaultRPCListen)
 	}()
+
+	select {
+	case <-ready:
+	case serverErr := <-errServer:
+		if serverErr != nil {
+			t.Fatalf("Failed to start HTTP server: %v", serverErr)
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
 
 	select {
 	case serverErr := <-errServer:
@@ -197,21 +208,18 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 			t.Fatalf("Failed to start HTTP server: %v", serverErr)
 		}
 	default:
-		// continue
-		wg.Wait()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
 	// Send transaction via JSON-RPC (include hash)
 	jsonReq := `{"jsonrpc":"2.0","method":"sendTransaction","params":[{"sender":"alice","token":"USDT","amount":"1234","hash":"` + txHash + `"}],"id":1}`
-	resp, err := sendJSONRPCRequest(rpcAddress, jsonReq)
+	resp, err := sendJSONRPCRequest(defaultRPCAddress, jsonReq)
 	require.NoError(t, err)
 	require.Contains(t, resp, "result")
 
 	jsonReqGet := `{"jsonrpc":"2.0","method":"getTransactionByHash","params":["` + txHash + `"],"id":2}`
-	respGet, err := sendJSONRPCRequest(rpcAddress, jsonReqGet)
+	respGet, err := sendJSONRPCRequest(defaultRPCAddress, jsonReqGet)
 	require.NoError(t, err)
 	require.Contains(t, respGet, "result")
 
@@ -343,17 +351,24 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
 
-	rpcAddress := "http://127.0.0.1:18545/rpc"
-
 	errServer := make(chan error, 1)
-	wg := sync.WaitGroup{}
-	wg.Add(1)
+	ready := make(chan struct{})
 
 	go func() {
-		wg.Done()
+		close(ready)
 
-		errServer <- rpcServer.StartHTTPServer(t.Context(), ":18545")
+		errServer <- rpcServer.StartHTTPServer(t.Context(), defaultRPCListen)
 	}()
+
+	select {
+	case <-ready:
+	case serverErr := <-errServer:
+		if serverErr != nil {
+			t.Fatalf("Failed to start HTTP server: %v", serverErr)
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
 
 	select {
 	case serverErr := <-errServer:
@@ -361,18 +376,14 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 			t.Fatalf("Failed to start HTTP server: %v", serverErr)
 		}
 	default:
-		// continue
-		wg.Wait()
-		time.Sleep(100 * time.Millisecond)
 	}
 
-	
 	jsonReq := fmt.Sprintf(
-		`{"jsonrpc":"2.0","method":"getAppBlock","params":[%d,{"number":0,"root":[0]}],"id":1}`,
+		`{"jsonrpc":"2.0","method":"getAppBlock","params":[%d],"id":1}`,
 		block.BlockNum,
 	)
 
-	respBody, err := sendJSONRPCRequest(rpcAddress, jsonReq)
+	respBody, err := sendJSONRPCRequest(defaultRPCAddress, jsonReq)
 	require.NoError(t, err)
 
 	var rpcResp rpc.JSONRPCResponse
@@ -396,4 +407,3 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 	require.Equal(t, "42", fieldValues["number"])
 	require.Equal(t, fmt.Sprintf("%v", block.Root), fieldValues["root"])
 }
-

@@ -9,8 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Optional
-// GenesisAccount represents an initial account balance
+// GenesisAccount represents an initial account balance configured for genesis.
 type GenesisAccount struct {
 	Address string
 	Token   string
