@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +60,87 @@ func createTempDBWithBalance(t *testing.T, user, token string, balance uint64) k
 	}
 
 	return db
+}
+
+func openTxPoolDB(t *testing.T) kv.RwDB {
+	t.Helper()
+
+	db, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(t.TempDir()).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return txpool.Tables()
+		}).
+		Open()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	return db
+}
+
+func openBlocksDB(t *testing.T) kv.RwDB {
+	t.Helper()
+
+	db, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(t.TempDir()).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{
+				gosdk.BlocksBucket: {},
+			}
+		}).
+		Open()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	return db
+}
+
+func startRPCServer(t *testing.T, server *rpc.StandardRPCServer, addr string) <-chan error {
+	t.Helper()
+
+	errServer := make(chan error, 1)
+	ready := make(chan struct{})
+
+	go func() {
+		close(ready)
+
+		errServer <- server.StartHTTPServer(t.Context(), addr)
+	}()
+
+	waitForServerReady(t, ready, errServer)
+
+	return errServer
+}
+
+func waitForServerReady(t *testing.T, ready <-chan struct{}, errServer <-chan error) {
+	t.Helper()
+
+	select {
+	case <-ready:
+	case serverErr := <-errServer:
+		require.NoError(t, serverErr, "Failed to start HTTP server")
+	}
+}
+
+func ensureServerHealthy(t *testing.T, errServer <-chan error) {
+	t.Helper()
+
+	time.Sleep(100 * time.Millisecond)
+
+	select {
+	case serverErr := <-errServer:
+		require.NoError(t, serverErr, "Failed to start HTTP server")
+	default:
+	}
+}
+
+func storeBlock(t *testing.T, ctx context.Context, db kv.RwDB, block *application.Block) {
+	t.Helper()
+
+	require.NoError(t, appblock.StoreAppBlock(ctx, db, block.BlockNum, block))
 }
 
 func TestCustomRPC_GetBalance(t *testing.T) {
@@ -166,15 +246,7 @@ func TestCustomRPC_GetBalance(t *testing.T) {
 
 // Integration test: start RPC server, send transaction, get transaction by hash
 func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
-	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(t.TempDir()).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return txpool.Tables()
-		}).
-		Open()
-	require.NoError(t, err)
-
-	defer localDB.Close()
+	localDB := openTxPoolDB(t)
 
 	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
 		localDB,
@@ -183,32 +255,8 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, nil, txPool, application.Block{})
 
-	errServer := make(chan error, 1)
-	ready := make(chan struct{})
-
-	go func() {
-		close(ready)
-
-		errServer <- rpcServer.StartHTTPServer(t.Context(), defaultRPCListen)
-	}()
-
-	select {
-	case <-ready:
-	case serverErr := <-errServer:
-		if serverErr != nil {
-			t.Fatalf("Failed to start HTTP server: %v", serverErr)
-		}
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	select {
-	case serverErr := <-errServer:
-		if serverErr != nil {
-			t.Fatalf("Failed to start HTTP server: %v", serverErr)
-		}
-	default:
-	}
+	errServer := startRPCServer(t, rpcServer, defaultRPCListen)
+	ensureServerHealthy(t, errServer)
 
 	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
@@ -252,15 +300,7 @@ func TestCustomRPC_GetBalance_NilDatabase(t *testing.T) {
 
 func TestDefaultRPC_MethodRegistration(t *testing.T) {
 	// Create local DB for txpool
-	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(t.TempDir()).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return txpool.Tables()
-		}).
-		Open()
-	require.NoError(t, err)
-
-	defer localDB.Close()
+	localDB := openTxPoolDB(t)
 
 	// Create txpool
 	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
@@ -308,30 +348,8 @@ func sendJSONRPCRequest(rpcAddress string, jsonReq string) (string, error) {
 
 func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "appblockdb")
-
-	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(dbPath).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				gosdk.BlocksBucket: {},
-			}
-		}).
-		Open()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		appchainDB.Close()
-	})
-
-	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(t.TempDir()).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return txpool.Tables()
-		}).
-		Open()
-	require.NoError(t, err)
-
-	defer localDB.Close()
+	appchainDB := openBlocksDB(t)
+	localDB := openTxPoolDB(t)
 
 	// Create txpool
 	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
@@ -344,39 +362,16 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 	block := &application.Block{
 		BlockNum: 42,
 		Root:     root,
+		Txs:      nil,
 	}
 
-	require.NoError(t, appblock.StoreAppBlock(ctx, appchainDB, block.BlockNum, block))
+	storeBlock(t, ctx, appchainDB, block)
 
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
 
-	errServer := make(chan error, 1)
-	ready := make(chan struct{})
-
-	go func() {
-		close(ready)
-
-		errServer <- rpcServer.StartHTTPServer(t.Context(), defaultRPCListen)
-	}()
-
-	select {
-	case <-ready:
-	case serverErr := <-errServer:
-		if serverErr != nil {
-			t.Fatalf("Failed to start HTTP server: %v", serverErr)
-		}
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	select {
-	case serverErr := <-errServer:
-		if serverErr != nil {
-			t.Fatalf("Failed to start HTTP server: %v", serverErr)
-		}
-	default:
-	}
+	errServer := startRPCServer(t, rpcServer, defaultRPCListen)
+	ensureServerHealthy(t, errServer)
 
 	jsonReq := fmt.Sprintf(
 		`{"jsonrpc":"2.0","method":"getAppBlock","params":[%d],"id":1}`,
@@ -396,8 +391,8 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 	var fv appblock.FieldsValues
 	require.NoError(t, json.Unmarshal(payload, &fv))
 
-	require.Len(t, fv.Fields, 2)
-	require.Len(t, fv.Values, 2)
+	require.Len(t, fv.Fields, 3)
+	require.Len(t, fv.Values, 3)
 
 	fieldValues := make(map[string]string, len(fv.Fields))
 	for i := range fv.Fields {
@@ -406,4 +401,63 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 
 	require.Equal(t, "42", fieldValues["number"])
 	require.Equal(t, fmt.Sprintf("%v", block.Root), fieldValues["root"])
+	require.Equal(t, "[]", fieldValues["txs"])
+}
+
+func TestDefaultRPC_Integration_GetTransactionsByBlock(t *testing.T) {
+	ctx := context.Background()
+	appchainDB := openBlocksDB(t)
+	localDB := openTxPoolDB(t)
+
+	// Create txpool
+	txPool := txpool.NewTxPool[application.TestTransaction[application.TestReceipt]](
+		localDB,
+	)
+
+	var root [32]byte
+	copy(root[:], []byte("example-root-hash-0000000000000000"))
+
+	testTxs := []application.TestTransaction[application.TestReceipt]{
+		{From: "0x1111", To: "0x2222", Value: 10},
+		{From: "0x3333", To: "0x4444", Value: 20},
+	}
+
+	block := &application.Block{
+		BlockNum: 42,
+		Root:     root,
+		Txs:      testTxs,
+	}
+
+	storeBlock(t, ctx, appchainDB, block)
+
+	rpcServer := rpc.NewStandardRPCServer(nil)
+	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
+
+	errServer := startRPCServer(t, rpcServer, defaultRPCListen)
+	ensureServerHealthy(t, errServer)
+
+	jsonReq := fmt.Sprintf(
+		`{"jsonrpc":"2.0","method":"getTransactionsByBlockNumber","params":[%d],"id":1}`,
+		block.BlockNum,
+	)
+
+	respBody, err := sendJSONRPCRequest(defaultRPCAddress, jsonReq)
+	require.NoError(t, err)
+
+	var rpcResp rpc.JSONRPCResponse
+	require.NoError(t, json.Unmarshal([]byte(respBody), &rpcResp))
+	require.Nil(t, rpcResp.Error)
+
+	resultPayload, err := json.Marshal(rpcResp.Result)
+	require.NoError(t, err)
+
+	var got []application.TestTransaction[application.TestReceipt]
+	require.NoError(t, json.Unmarshal(resultPayload, &got))
+	require.Equal(t, block.Txs, got)
+
+	for i := range block.Txs {
+		require.Equal(t, block.Txs[i].From, got[i].From)
+		require.Equal(t, block.Txs[i].To, got[i].To)
+		require.Equal(t, block.Txs[i].Value, got[i].Value)
+	}
 }
