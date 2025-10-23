@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,11 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/0xAtelerix/example/application"
-)
-
-const (
-	defaultRPCAddress = "http://127.0.0.1:18545/rpc"
-	defaultRPCListen  = ":18545"
 )
 
 // createTempDBWithBalance creates a temporary in-memory database with test balance data
@@ -98,49 +94,88 @@ func openBlocksDB(t *testing.T) kv.RwDB {
 	return db
 }
 
-func startRPCServer(t *testing.T, server *rpc.StandardRPCServer, addr string) <-chan error {
+func startRPCServer(t *testing.T, server *rpc.StandardRPCServer) string {
 	t.Helper()
 
+	resetDefaultServeMux()
+
+	addr := randomLocalAddress(t)
 	errServer := make(chan error, 1)
-	ready := make(chan struct{})
 
 	go func() {
-		close(ready)
-
 		errServer <- server.StartHTTPServer(t.Context(), addr)
 	}()
 
-	waitForServerReady(t, ready, errServer)
+	baseURL := "http://" + addr
 
-	return errServer
+	waitForServerHealthy(t, baseURL+"/health", errServer)
+
+	return baseURL
 }
 
-func waitForServerReady(t *testing.T, ready <-chan struct{}, errServer <-chan error) {
+func randomLocalAddress(t *testing.T) string {
 	t.Helper()
 
-	select {
-	case <-ready:
-	case serverErr := <-errServer:
-		require.NoError(t, serverErr, "Failed to start HTTP server")
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	addr := listener.Addr().String()
+	require.NoError(t, listener.Close())
+
+	return addr
 }
 
-func ensureServerHealthy(t *testing.T, errServer <-chan error) {
+func waitForServerHealthy(t *testing.T, healthURL string, errServer <-chan error) {
 	t.Helper()
 
-	time.Sleep(100 * time.Millisecond)
-
-	select {
-	case serverErr := <-errServer:
-		require.NoError(t, serverErr, "Failed to start HTTP server")
-	default:
+	client := &http.Client{
+		Timeout: 200 * time.Millisecond,
 	}
+
+	const attempts = 20
+	for range attempts {
+		select {
+		case serverErr := <-errServer:
+			require.NoError(t, serverErr, "Failed to start HTTP server")
+
+			return
+		default:
+		}
+
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			healthURL,
+			http.NoBody,
+		)
+		require.NoError(t, err)
+
+		resp, err := client.Do(req)
+		if err == nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				t.Errorf("close health response body: %v", closeErr)
+			}
+
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatalf("RPC server at %s did not become healthy", healthURL)
 }
 
-func storeBlock(t *testing.T, ctx context.Context, db kv.RwDB, block *application.Block) {
+func storeBlock(ctx context.Context, t *testing.T, db kv.RwDB, block *application.Block) {
 	t.Helper()
 
 	require.NoError(t, appblock.StoreAppBlock(ctx, db, block.BlockNum, block))
+}
+
+func resetDefaultServeMux() {
+	http.DefaultServeMux = http.NewServeMux()
 }
 
 func TestCustomRPC_GetBalance(t *testing.T) {
@@ -255,19 +290,18 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, nil, txPool, application.Block{})
 
-	errServer := startRPCServer(t, rpcServer, defaultRPCListen)
-	ensureServerHealthy(t, errServer)
+	baseURL := startRPCServer(t, rpcServer)
 
 	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
 	// Send transaction via JSON-RPC (include hash)
 	jsonReq := `{"jsonrpc":"2.0","method":"sendTransaction","params":[{"sender":"alice","token":"USDT","amount":"1234","hash":"` + txHash + `"}],"id":1}`
-	resp, err := sendJSONRPCRequest(defaultRPCAddress, jsonReq)
+	resp, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReq)
 	require.NoError(t, err)
 	require.Contains(t, resp, "result")
 
 	jsonReqGet := `{"jsonrpc":"2.0","method":"getTransactionByHash","params":["` + txHash + `"],"id":2}`
-	respGet, err := sendJSONRPCRequest(defaultRPCAddress, jsonReqGet)
+	respGet, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReqGet)
 	require.NoError(t, err)
 	require.Contains(t, respGet, "result")
 
@@ -365,20 +399,19 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 		Txs:      nil,
 	}
 
-	storeBlock(t, ctx, appchainDB, block)
+	storeBlock(ctx, t, appchainDB, block)
 
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
 
-	errServer := startRPCServer(t, rpcServer, defaultRPCListen)
-	ensureServerHealthy(t, errServer)
+	baseURL := startRPCServer(t, rpcServer)
 
 	jsonReq := fmt.Sprintf(
 		`{"jsonrpc":"2.0","method":"getAppBlock","params":[%d],"id":1}`,
 		block.BlockNum,
 	)
 
-	respBody, err := sendJSONRPCRequest(defaultRPCAddress, jsonReq)
+	respBody, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReq)
 	require.NoError(t, err)
 
 	var rpcResp rpc.JSONRPCResponse
@@ -428,20 +461,19 @@ func TestDefaultRPC_Integration_GetTransactionsByBlock(t *testing.T) {
 		Txs:      testTxs,
 	}
 
-	storeBlock(t, ctx, appchainDB, block)
+	storeBlock(ctx, t, appchainDB, block)
 
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
 
-	errServer := startRPCServer(t, rpcServer, defaultRPCListen)
-	ensureServerHealthy(t, errServer)
+	baseURL := startRPCServer(t, rpcServer)
 
 	jsonReq := fmt.Sprintf(
 		`{"jsonrpc":"2.0","method":"getTransactionsByBlockNumber","params":[%d],"id":1}`,
 		block.BlockNum,
 	)
 
-	respBody, err := sendJSONRPCRequest(defaultRPCAddress, jsonReq)
+	respBody, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReq)
 	require.NoError(t, err)
 
 	var rpcResp rpc.JSONRPCResponse

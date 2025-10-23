@@ -31,7 +31,9 @@ func (TestTransaction[R]) Process(
 	return rec, txs, err
 }
 
-// TestReceipt - test receipt implementation
+// TestReceipt - test receipt implementation.
+//
+//nolint:errname // TestReceipt implements Error to satisfy Receipt interface in tests
 type TestReceipt struct {
 	ReceiptStatus   apptypes.TxReceiptStatus `json:"status" cbor:"1,keyasint"`
 	TransactionHash [32]byte                 `json:"txHash" cbor:"2,keyasint"`
