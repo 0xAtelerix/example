@@ -168,6 +168,20 @@ func waitForServerHealthy(t *testing.T, healthURL string, errServer <-chan error
 	t.Fatalf("RPC server at %s did not become healthy", healthURL)
 }
 
+func makeTestBlock(
+	blockNum uint64,
+	txs []application.TestTransaction[application.TestReceipt],
+) *application.Block {
+	var root [32]byte
+	copy(root[:], []byte("example-root-hash-0000000000000000"))
+
+	return &application.Block{
+		BlockNum: blockNum,
+		Root:     root,
+		Txs:      txs,
+	}
+}
+
 func storeBlock(ctx context.Context, t *testing.T, db kv.RwDB, block *application.Block) {
 	t.Helper()
 
@@ -390,14 +404,7 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 		localDB,
 	)
 
-	var root [32]byte
-	copy(root[:], []byte("example-root-hash-0000000000000000"))
-
-	block := &application.Block{
-		BlockNum: 42,
-		Root:     root,
-		Txs:      nil,
-	}
+	block := makeTestBlock(42, nil)
 
 	storeBlock(ctx, t, appchainDB, block)
 
@@ -447,19 +454,12 @@ func TestDefaultRPC_Integration_GetTransactionsByBlock(t *testing.T) {
 		localDB,
 	)
 
-	var root [32]byte
-	copy(root[:], []byte("example-root-hash-0000000000000000"))
-
 	testTxs := []application.TestTransaction[application.TestReceipt]{
 		{From: "0x1111", To: "0x2222", Value: 10},
 		{From: "0x3333", To: "0x4444", Value: 20},
 	}
 
-	block := &application.Block{
-		BlockNum: 42,
-		Root:     root,
-		Txs:      testTxs,
-	}
+	block := makeTestBlock(42, testTxs)
 
 	storeBlock(ctx, t, appchainDB, block)
 

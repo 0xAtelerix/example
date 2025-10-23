@@ -1,7 +1,6 @@
 package application
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"strconv"
 
@@ -90,14 +89,4 @@ func BlockConstructor(
 		BlockNum: blockNumber,
 		Root:     stateRoot,
 	}
-}
-
-// RandBytes returns a slice filled with cryptographically secure random bytes.
-func RandBytes(length int) []byte {
-	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
-		panic(err)
-	}
-
-	return buf
 }
