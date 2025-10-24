@@ -81,16 +81,16 @@ func TestEndToEnd(t *testing.T) {
 
 	if err = waitUntil(ctx, func() bool {
 		// GET is fine; we only care the port is bound.
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, http.MethodGet, rpcURL, nil)
-		require.NoError(t, err, "GET req /rpc")
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, rpcURL, nil)
+		require.NoError(t, reqErr, "GET req /rpc")
 
-		var resp *http.Response
-		resp, err = http.DefaultClient.Do(req)
-		require.NoError(t, err, "GET res /rpc")
+		resp, respErr := http.DefaultClient.Do(req)
+		if respErr != nil {
+			return false
+		}
 
-		err = resp.Body.Close()
-		require.NoError(t, err)
+		closeErr := resp.Body.Close()
+		require.NoError(t, closeErr)
 
 		return true
 	}); err != nil {
