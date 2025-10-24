@@ -302,7 +302,12 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 	)
 
 	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(rpcServer, nil, txPool, application.Block{})
+	rpc.AddStandardMethods(
+		rpcServer,
+		nil,
+		txPool,
+		func() *application.Block { return &application.Block{} },
+	)
 
 	baseURL := startRPCServer(t, rpcServer)
 
@@ -360,7 +365,12 @@ func TestDefaultRPC_MethodRegistration(t *testing.T) {
 
 	// Test that AddStandardMethods doesn't panic (even with minimal setup)
 	require.NotPanics(t, func() {
-		rpc.AddStandardMethods(rpcServer, nil, txPool, application.Block{})
+		rpc.AddStandardMethods(
+			rpcServer,
+			nil,
+			txPool,
+			func() *application.Block { return &application.Block{} },
+		)
 	})
 }
 
@@ -409,7 +419,12 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 	storeBlock(ctx, t, appchainDB, block)
 
 	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
+	rpc.AddStandardMethods(
+		rpcServer,
+		appchainDB,
+		txPool,
+		func() *application.Block { return &application.Block{} },
+	)
 
 	baseURL := startRPCServer(t, rpcServer)
 
@@ -464,7 +479,12 @@ func TestDefaultRPC_Integration_GetTransactionsByBlock(t *testing.T) {
 	storeBlock(ctx, t, appchainDB, block)
 
 	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, &application.Block{})
+	rpc.AddStandardMethods(
+		rpcServer,
+		appchainDB,
+		txPool,
+		func() *application.Block { return &application.Block{} },
+	)
 
 	baseURL := startRPCServer(t, rpcServer)
 

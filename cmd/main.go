@@ -221,7 +221,7 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 		select {
 		case <-ctx.Done():
 			// nothing to do
-		case runErr <- appchainExample.Run(ctx, nil):
+		case runErr <- appchainExample.Run(ctx):
 			// nothing to do
 		}
 	}()
@@ -232,7 +232,12 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 	rpcServer.AddMiddleware(api.NewExampleMiddleware(log.Logger))
 
 	// Add standard RPC methods - Refer RPC readme in sdk for details
-	rpc.AddStandardMethods(rpcServer, appchainDB, txPool, application.Block{})
+	rpc.AddStandardMethods(
+		rpcServer,
+		appchainDB,
+		txPool,
+		func() *application.Block { return &application.Block{} },
+	)
 
 	// Add custom RPC methods - Optional
 	api.NewCustomRPC(rpcServer, appchainDB).AddRPCMethods()

@@ -30,12 +30,14 @@ const (
 	// This is a demo address on Polygon-Amoy testnet.
 	ExampleContractAddress = "0x8D350d5351A936Ef3e2907C0a438Fc941DAE3bfd"
 
-	// DepositEventSignature is the signature for Deposit(address,string,uint256).
+	// Event signatures for the Example contract events
+	// These correspond to events in 0xAtelerix/sdk/contracts/example/Example.sol
+	// Deposit(address,string,uint256) event signature
 	DepositEventSignature = "0x2d4b597935f3cd67fb2eebf1db4debc934cee5c7baa7153f980fdbeb2e74084e"
-	// SwapEventSignature is the signature for Swap(address,string,string,uint256).
+	// Swap(address,string,string,uint256) event signature
 	SwapEventSignature = "0x363ba239c72b81c4726aba8829ad4df22628bf7d09efc5f7a18063a53ec1c4ba"
-	// WithdrawToSolanaSignature is the signature for WithdrawToSolana(uint256).
-	// This event triggers a cross-chain transfer from EVM to Solana.
+	// WithdrawToSolana(uint256) event signature
+	// This event triggers a cross-chain transfer from EVM to Solana
 	WithdrawToSolanaSignature = "0x245ecbfbddf346446b302f2dc8237ed1144f6f9407cb9708e2d0734458c72950"
 
 	// ABI definitions for event decoding
@@ -69,7 +71,7 @@ func NewStateTransition(msa *gosdk.MultichainStateAccess) *StateTransition {
 	}
 }
 
-// ProcessBlock handles external chain blocks and dispatches them to chain-specific logic.
+// how to external chains blocks
 func (st *StateTransition) ProcessBlock(
 	b apptypes.ExternalBlock,
 	tx kv.RwTx,
@@ -223,9 +225,9 @@ func (*StateTransition) processReceipt(
 				amountOut := calculateSwapOutput(tokenIn, tokenOut, amountIn)
 
 				// Create an external transaction record for the destination chain (EVM)
-				extTx, err := external.NewExTxBuilder().
-					EthereumSepolia().
-					SetPayload(createTokenMintPayload(userAddr, amountOut, tokenOut)).
+				extTx, err := external.NewExTxBuilder(
+					createTokenMintPayload(userAddr, amountOut, tokenOut),
+					gosdk.EthereumSepoliaChainID).
 					Build()
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to create external transaction for swap event")
