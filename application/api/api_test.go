@@ -14,6 +14,7 @@ import (
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/appblock"
+	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/0xAtelerix/sdk/gosdk/rpc"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
 	"github.com/holiman/uint256"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/0xAtelerix/example/application"
 )
+
+func newBlock() *application.Block { return &application.Block{} }
 
 // createTempDBWithBalance creates a temporary in-memory database with test balance data
 func createTempDBWithBalance(t *testing.T, user, token string, balance uint64) kv.RoDB {
@@ -75,15 +78,21 @@ func openTxPoolDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func newTxPool[T apptypes.AppTransaction[R], R apptypes.Receipt](
+	t *testing.T,
+) *txpool.TxPool[T, R] {
+	t.Helper()
+
+	return txpool.NewTxPool[T, R](openTxPoolDB(t))
+}
+
 func openBlocksDB(t *testing.T) kv.RwDB {
 	t.Helper()
 
 	db, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(t.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				gosdk.BlocksBucket: {},
-			}
+			return gosdk.DefaultTables()
 		}).
 		Open()
 	require.NoError(t, err)
@@ -166,6 +175,119 @@ func waitForServerHealthy(t *testing.T, healthURL string, errServer <-chan error
 	}
 
 	t.Fatalf("RPC server at %s did not become healthy", healthURL)
+}
+
+func newStandardRPCClient[T apptypes.AppTransaction[R], R apptypes.Receipt](
+	t *testing.T,
+	appchainDB kv.RwDB,
+	txPool *txpool.TxPool[T, R],
+) *rpcTestClient {
+	t.Helper()
+
+	server := rpc.NewStandardRPCServer(nil)
+	rpc.AddStandardMethods(
+		server,
+		appchainDB,
+		txPool,
+		newBlock,
+	)
+
+	baseURL := startRPCServer(t, server)
+
+	return newRPCTestClient(t, baseURL)
+}
+
+type rpcTestClient struct {
+	t          *testing.T
+	baseURL    string
+	httpClient *http.Client
+	nextID     int
+}
+
+func newRPCTestClient(t *testing.T, baseURL string) *rpcTestClient {
+	t.Helper()
+
+	return &rpcTestClient{
+		t:       t,
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout: 2 * time.Second,
+		},
+	}
+}
+
+func (c *rpcTestClient) Call(method string, params []any) rpc.JSONRPCResponse {
+	c.t.Helper()
+
+	c.nextID++
+
+	reqBody := rpc.JSONRPCRequest{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
+		ID:      c.nextID,
+	}
+
+	payload, err := json.Marshal(reqBody)
+	require.NoError(c.t, err)
+
+	httpReq, err := http.NewRequestWithContext(
+		c.t.Context(),
+		http.MethodPost,
+		c.baseURL+"/rpc",
+		bytes.NewReader(payload),
+	)
+	require.NoError(c.t, err)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	require.NoError(c.t, err)
+
+	defer func() {
+		require.NoError(c.t, resp.Body.Close())
+	}()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(c.t, err)
+
+	require.Equalf(
+		c.t,
+		http.StatusOK,
+		resp.StatusCode,
+		"unexpected HTTP status %s: %s",
+		resp.Status,
+		string(body),
+	)
+
+	var rpcResp rpc.JSONRPCResponse
+	require.NoError(c.t, json.Unmarshal(body, &rpcResp))
+
+	return rpcResp
+}
+
+func (c *rpcTestClient) MustCall(method string, params []any) rpc.JSONRPCResponse {
+	c.t.Helper()
+
+	resp := c.Call(method, params)
+	require.Nil(c.t, resp.Error, "json-rpc error: %+v", resp.Error)
+
+	return resp
+}
+
+func decodeRPCResult[T any](t *testing.T, resp rpc.JSONRPCResponse, out *T) {
+	t.Helper()
+
+	payload := mustMarshalJSON(t, resp.Result)
+	require.NoError(t, json.Unmarshal(payload, out))
+}
+
+func mustMarshalJSON(t *testing.T, v any) []byte {
+	t.Helper()
+
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+
+	return data
 }
 
 func makeTestBlock(
@@ -295,38 +417,36 @@ func TestCustomRPC_GetBalance(t *testing.T) {
 
 // Integration test: start RPC server, send transaction, get transaction by hash
 func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
-	localDB := openTxPoolDB(t)
+	txPool := newTxPool[application.Transaction[application.Receipt], application.Receipt](t)
 
-	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
-		localDB,
-	)
-
-	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(
-		rpcServer,
-		nil,
-		txPool,
-		func() *application.Block { return &application.Block{} },
-	)
-
-	baseURL := startRPCServer(t, rpcServer)
+	client := newStandardRPCClient(t, nil, txPool)
 
 	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
-	// Send transaction via JSON-RPC (include hash)
-	jsonReq := `{"jsonrpc":"2.0","method":"sendTransaction","params":[{"sender":"alice","token":"USDT","amount":"1234","hash":"` + txHash + `"}],"id":1}`
-	resp, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReq)
-	require.NoError(t, err)
-	require.Contains(t, resp, "result")
+	tx := application.Transaction[application.Receipt]{
+		Sender:   "alice",
+		Receiver: "bob",
+		Token:    "USDT",
+		Value:    1234,
+		TxHash:   txHash,
+	}
 
-	jsonReqGet := `{"jsonrpc":"2.0","method":"getTransactionByHash","params":["` + txHash + `"],"id":2}`
-	respGet, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReqGet)
-	require.NoError(t, err)
-	require.Contains(t, respGet, "result")
+	sendResp := client.MustCall("sendTransaction", []any{tx})
 
-	require.Contains(t, respGet, "alice")
-	require.Contains(t, respGet, "USDT")
-	require.Contains(t, respGet, "1234")
+	hashResult, ok := sendResp.Result.(string)
+	require.True(t, ok)
+	require.True(t, strings.EqualFold(hashResult, txHash))
+
+	getResp := client.MustCall("getTransactionByHash", []any{txHash})
+
+	var fetched application.Transaction[application.Receipt]
+	decodeRPCResult(t, getResp, &fetched)
+
+	require.Equal(t, tx.Sender, fetched.Sender)
+	require.Equal(t, tx.Receiver, fetched.Receiver)
+	require.Equal(t, tx.Token, fetched.Token)
+	require.Equal(t, tx.Value, fetched.Value)
+	require.True(t, strings.EqualFold(tx.TxHash, fetched.TxHash))
 }
 
 func TestCustomRPC_GetBalance_NilDatabase(t *testing.T) {
@@ -351,100 +471,21 @@ func TestCustomRPC_GetBalance_NilDatabase(t *testing.T) {
 	}
 }
 
-func TestDefaultRPC_MethodRegistration(t *testing.T) {
-	// Create local DB for txpool
-	localDB := openTxPoolDB(t)
-
-	// Create txpool
-	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
-		localDB,
-	)
-
-	// Create RPC server and add standard methods
-	rpcServer := rpc.NewStandardRPCServer(nil)
-
-	// Test that AddStandardMethods doesn't panic (even with minimal setup)
-	require.NotPanics(t, func() {
-		rpc.AddStandardMethods(
-			rpcServer,
-			nil,
-			txPool,
-			func() *application.Block { return &application.Block{} },
-		)
-	})
-}
-
-// Helper: send JSON-RPC request to local server
-func sendJSONRPCRequest(rpcAddress string, jsonReq string) (string, error) {
-	req, err := http.NewRequestWithContext(
-		context.Background(),
-		http.MethodPost,
-		rpcAddress,
-		bytes.NewBufferString(jsonReq),
-	)
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(body), nil
-}
-
 func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 	ctx := context.Background()
 	appchainDB := openBlocksDB(t)
-	localDB := openTxPoolDB(t)
-
-	// Create txpool
-	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
-		localDB,
-	)
+	txPool := newTxPool[application.Transaction[application.Receipt], application.Receipt](t)
 
 	block := makeTestBlock(42, nil)
 
 	storeBlock(ctx, t, appchainDB, block)
 
-	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(
-		rpcServer,
-		appchainDB,
-		txPool,
-		func() *application.Block { return &application.Block{} },
-	)
+	client := newStandardRPCClient(t, appchainDB, txPool)
 
-	baseURL := startRPCServer(t, rpcServer)
-
-	jsonReq := fmt.Sprintf(
-		`{"jsonrpc":"2.0","method":"getAppBlock","params":[%d],"id":1}`,
-		block.BlockNum,
-	)
-
-	respBody, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReq)
-	require.NoError(t, err)
-
-	var rpcResp rpc.JSONRPCResponse
-	require.NoError(t, json.Unmarshal([]byte(respBody), &rpcResp))
-	require.Nil(t, rpcResp.Error)
-
-	payload, err := json.Marshal(rpcResp.Result)
-	require.NoError(t, err)
+	resp := client.MustCall("getAppBlock", []any{block.BlockNum})
 
 	var fv appblock.FieldsValues
-	require.NoError(t, json.Unmarshal(payload, &fv))
+	decodeRPCResult(t, resp, &fv)
 
 	require.Len(t, fv.Fields, 3)
 	require.Len(t, fv.Values, 3)
@@ -462,11 +503,8 @@ func TestDefaultRPC_Integration_GetAppBlock(t *testing.T) {
 func TestDefaultRPC_Integration_GetTransactionsByBlock(t *testing.T) {
 	ctx := context.Background()
 	appchainDB := openBlocksDB(t)
-	localDB := openTxPoolDB(t)
-
-	// Create txpool
-	txPool := txpool.NewTxPool[application.TestTransaction[application.TestReceipt]](
-		localDB,
+	txPool := newTxPool[application.TestTransaction[application.TestReceipt], application.TestReceipt](
+		t,
 	)
 
 	testTxs := []application.TestTransaction[application.TestReceipt]{
@@ -478,33 +516,12 @@ func TestDefaultRPC_Integration_GetTransactionsByBlock(t *testing.T) {
 
 	storeBlock(ctx, t, appchainDB, block)
 
-	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(
-		rpcServer,
-		appchainDB,
-		txPool,
-		func() *application.Block { return &application.Block{} },
-	)
+	client := newStandardRPCClient(t, appchainDB, txPool)
 
-	baseURL := startRPCServer(t, rpcServer)
-
-	jsonReq := fmt.Sprintf(
-		`{"jsonrpc":"2.0","method":"getTransactionsByBlockNumber","params":[%d],"id":1}`,
-		block.BlockNum,
-	)
-
-	respBody, err := sendJSONRPCRequest(baseURL+"/rpc", jsonReq)
-	require.NoError(t, err)
-
-	var rpcResp rpc.JSONRPCResponse
-	require.NoError(t, json.Unmarshal([]byte(respBody), &rpcResp))
-	require.Nil(t, rpcResp.Error)
-
-	resultPayload, err := json.Marshal(rpcResp.Result)
-	require.NoError(t, err)
+	resp := client.MustCall("getTransactionsByBlockNumber", []any{block.BlockNum})
 
 	var got []application.TestTransaction[application.TestReceipt]
-	require.NoError(t, json.Unmarshal(resultPayload, &got))
+	decodeRPCResult(t, resp, &got)
 	require.Equal(t, block.Txs, got)
 
 	for i := range block.Txs {
