@@ -236,7 +236,7 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 		rpcServer,
 		appchainDB,
 		txPool,
-		func() *application.Block { return &application.Block{} },
+		&application.Block{},
 	)
 
 	// Add custom RPC methods - Optional

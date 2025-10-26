@@ -27,8 +27,6 @@ import (
 	"github.com/0xAtelerix/example/application"
 )
 
-func newBlock() *application.Block { return &application.Block{} }
-
 // createTempDBWithBalance creates a temporary in-memory database with test balance data
 func createTempDBWithBalance(t *testing.T, user, token string, balance uint64) kv.RoDB {
 	t.Helper()
@@ -189,7 +187,7 @@ func newStandardRPCClient[T apptypes.AppTransaction[R], R apptypes.Receipt](
 		server,
 		appchainDB,
 		txPool,
-		newBlock,
+		&application.Block{},
 	)
 
 	baseURL := startRPCServer(t, server)
