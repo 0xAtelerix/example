@@ -171,8 +171,20 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 		localDB,
 	)
 
+	// Create appchain DB for AddStandardMethods
+	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(t.TempDir()).
+		Open()
+	require.NoError(t, err)
+
+	defer appchainDB.Close()
+
 	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods(rpcServer, nil, txPool)
+	rpc.AddStandardMethods[
+		application.Transaction[application.Receipt],
+		application.Receipt,
+		application.Block,
+	](rpcServer, appchainDB, txPool, 42)
 
 	rpcAddress := "http://127.0.0.1:18545/rpc"
 
@@ -205,7 +217,7 @@ func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, resp, "result")
 
-	jsonReqGet := `{"jsonrpc":"2.0","method":"getTransactionByHash","params":["` + txHash + `"],"id":2}`
+	jsonReqGet := `{"jsonrpc":"2.0","method":"getTransaction","params":["` + txHash + `"],"id":2}`
 	respGet, err := sendJSONRPCRequest(rpcAddress, jsonReqGet)
 	require.NoError(t, err)
 	require.Contains(t, respGet, "result")
@@ -259,7 +271,11 @@ func TestDefaultRPC_MethodRegistration(t *testing.T) {
 
 	// Test that AddStandardMethods doesn't panic (even with minimal setup)
 	require.NotPanics(t, func() {
-		rpc.AddStandardMethods(rpcServer, nil, txPool)
+		rpc.AddStandardMethods[
+			application.Transaction[application.Receipt],
+			application.Receipt,
+			application.Block,
+		](rpcServer, nil, txPool, 42)
 	})
 }
 
