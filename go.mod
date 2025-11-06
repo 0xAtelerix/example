@@ -3,7 +3,7 @@ module github.com/0xAtelerix/example
 go 1.25.0
 
 require (
-	github.com/0xAtelerix/sdk v0.0.0-20251030091044-354e35dc2b34
+	github.com/0xAtelerix/sdk v0.1.6
 	github.com/blocto/solana-go-sdk v1.30.0
 	github.com/ethereum/go-ethereum v1.16.3
 	github.com/fxamacker/cbor/v2 v2.9.0
