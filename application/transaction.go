@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
+var _ apptypes.AppTransaction[Receipt] = &Transaction[Receipt]{}
+
 func AccountKey(sender string, token string) []byte {
 	return []byte(token + sender)
 }
