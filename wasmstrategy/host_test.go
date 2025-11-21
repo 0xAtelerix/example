@@ -30,6 +30,12 @@ var testForbiddenImport []byte
 //go:embed testdata/memory_import.wasm
 var testMemoryImport []byte
 
+//go:embed testdata/instruction_gas.wasm
+var instructionGasTestWasm []byte
+
+//go:embed testdata/memory_grow.wasm
+var memoryGrowGasTestWasm []byte
+
 func newTestDB(t *testing.T) kv.RwDB {
 	t.Helper()
 
@@ -90,8 +96,6 @@ func writeSlot(t *testing.T, ctx context.Context, db kv.RwDB, slot int32, value 
 }
 
 func newStrategyModule(t *testing.T, ctx context.Context, db kv.RwDB, sink *bytes.Buffer) *StrategyModule {
-	t.Helper()
-
 	logger := zerolog.New(sink).Level(zerolog.DebugLevel)
 
 	module, err := NewStrategyModule(ctx, ModuleConfig{
@@ -100,9 +104,30 @@ func newStrategyModule(t *testing.T, ctx context.Context, db kv.RwDB, sink *byte
 		DB:     db,
 		Logger: &logger,
 		Limits: StrategyLimits{
-			GasLimit: 5000,
-			Timeout:  time.Second,
+			GasLimit:         5000,
+			Timeout:          time.Second,
+			FunctionCallCost: defaultFunctionCost,
 		},
+	})
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		require.NoError(t, module.Close(ctx))
+	})
+
+	return module
+}
+
+func newStrategyModuleFromBytes(t *testing.T, ctx context.Context, db kv.RwDB, wasmBytes []byte, limits StrategyLimits) *StrategyModule {
+	var sink bytes.Buffer
+	logger := zerolog.New(&sink).Level(zerolog.DebugLevel)
+
+	module, err := NewStrategyModule(ctx, ModuleConfig{
+		ID:     "test-raw",
+		Wasm:   wasmBytes,
+		DB:     db,
+		Logger: &logger,
+		Limits: limits,
 	})
 	require.NoError(t, err)
 
@@ -165,7 +190,11 @@ func TestStrategyModuleGasLimitExceeded(t *testing.T) {
 	var logs bytes.Buffer
 
 	module := newStrategyModule(t, ctx, db, &logs)
-	module.limits = StrategyLimits{GasLimit: 1, Timeout: time.Second}
+	module.limits = StrategyLimits{
+		GasLimit:         10,
+		Timeout:          time.Second,
+		FunctionCallCost: 20,
+	}
 
 	err := module.OnBlock(ctx, BlockContext{
 		BlockNumber: 1,
@@ -200,4 +229,74 @@ func TestValidateModuleRejectsMemoryImports(t *testing.T) {
 
 	err = validateModule(module)
 	require.EqualError(t, err, "imported memories are not supported")
+}
+
+func TestGasExecutionDeterministic(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	module := newStrategyModuleFromBytes(t, ctx, db, instructionGasTestWasm, StrategyLimits{
+		GasLimit:         60,
+		Timeout:          time.Second,
+		FunctionCallCost: 1,
+	})
+
+	block := BlockContext{BlockNumber: 1, ChainID: 42}
+
+	require.NoError(t, module.OnBlock(ctx, block))
+	require.NoError(t, module.OnBlock(ctx, block))
+}
+
+func TestGasLimitExceededOnInstructionCalls(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	module := newStrategyModuleFromBytes(t, ctx, db, instructionGasTestWasm, StrategyLimits{
+		GasLimit:         20,
+		Timeout:          time.Second,
+		FunctionCallCost: 1,
+	})
+
+	err := module.OnBlock(ctx, BlockContext{BlockNumber: 1, ChainID: 42})
+	require.ErrorIs(t, err, errGasLimitExceeded)
+}
+
+func TestGasLimitAllowsExactUsage(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	module := newStrategyModuleFromBytes(t, ctx, db, instructionGasTestWasm, StrategyLimits{
+		GasLimit:         costDbRead*2 + 2,
+		Timeout:          time.Second,
+		FunctionCallCost: 1,
+	})
+
+	require.NoError(t, module.OnBlock(ctx, BlockContext{BlockNumber: 1, ChainID: 42}))
+}
+
+func TestGasLimitExceededOnMemoryGrowth(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	module := newStrategyModuleFromBytes(t, ctx, db, memoryGrowGasTestWasm, StrategyLimits{
+		GasLimit:         20,
+		Timeout:          time.Second,
+		FunctionCallCost: 1,
+	})
+
+	err := module.OnBlock(ctx, BlockContext{BlockNumber: 1, ChainID: 42})
+	require.ErrorIs(t, err, errGasLimitExceeded)
+}
+
+func TestGasLimitMemoryGrowthPass(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	module := newStrategyModuleFromBytes(t, ctx, db, memoryGrowGasTestWasm, StrategyLimits{
+		GasLimit:         30,
+		Timeout:          time.Second,
+		FunctionCallCost: 1,
+	})
+
+	require.NoError(t, module.OnBlock(ctx, BlockContext{BlockNumber: 1, ChainID: 42}))
 }

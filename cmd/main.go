@@ -67,7 +67,7 @@ func RunCLI(ctx context.Context) {
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
 	multichainConfigJSON := fs.String("multichain-config", "", "Multichain config JSON path")
 	logLevel := fs.Int("log-level", int(zerolog.InfoLevel), "Logging level")
-	strategyDir := fs.String("strategy-dir", "", "Directory containing strategy WASM modules")
+	strategyDir := fs.String("strategy-dir", "./build", "Directory containing strategy WASM modules")
 	strategyReload := fs.Duration("strategy-reload-interval", 5*time.Second, "Interval for rescanning the strategy directory")
 	strategyGasLimit := fs.Uint64("strategy-gas-limit", 100000, "Per-strategy gas limit when executing on_block")
 	strategyTimeout := fs.Duration("strategy-timeout", 50*time.Millisecond, "Per-strategy execution timeout")

@@ -3,7 +3,9 @@ ASC=npx --prefix as asc
 WASM_TESTDATA_DIR=wasmstrategy/testdata
 WASM_TESTDATA=$(WASM_TESTDATA_DIR)/uniswap_strategy.wasm \
 	$(WASM_TESTDATA_DIR)/forbidden_import.wasm \
-	$(WASM_TESTDATA_DIR)/memory_import.wasm
+	$(WASM_TESTDATA_DIR)/memory_import.wasm \
+	$(WASM_TESTDATA_DIR)/instruction_gas.wasm \
+	$(WASM_TESTDATA_DIR)/memory_grow.wasm
 
 run:
 	go run cmd/main.go \
@@ -52,7 +54,13 @@ $(WASM_TESTDATA_DIR)/forbidden_import.wasm: $(WASM_TESTDATA_DIR)/as/forbidden_im
 	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert -o $@
 
 $(WASM_TESTDATA_DIR)/memory_import.wasm: $(WASM_TESTDATA_DIR)/as/memory_import.ts
-	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert --importMemory -o $@
+	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert -o $@
+
+$(WASM_TESTDATA_DIR)/instruction_gas.wasm: $(WASM_TESTDATA_DIR)/as/instruction_gas.ts
+	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert -o $@
+
+$(WASM_TESTDATA_DIR)/memory_grow.wasm: $(WASM_TESTDATA_DIR)/as/memory_grow.ts
+	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert -o $@
 
 tests:
 	go test -short -timeout 20m -failfast -shuffle=on -v ./... $(params)

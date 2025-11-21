@@ -102,6 +102,12 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*Manager, error) {
 	if manager.limits.GasLimit == 0 {
 		manager.limits.GasLimit = defaultGasLimit
 	}
+	if manager.limits.FunctionCallCost == 0 {
+		manager.limits.FunctionCallCost = defaultFunctionCost
+	}
+	if manager.limits.FunctionCallCost == 0 {
+		manager.limits.FunctionCallCost = defaultFunctionCost
+	}
 
 	if err := manager.reload(ctx); err != nil {
 		return nil, err

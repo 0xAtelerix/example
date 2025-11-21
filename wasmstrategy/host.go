@@ -13,20 +13,22 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/sys"
 
 	"github.com/0xAtelerix/example/application"
 )
 
 const (
-	gasExitCode       uint32 = 0xfffffff0
-	hostAbortExitCode uint32 = 0xfffffff1
-	defaultGasLimit          = 50_000
-	costCheap         uint64 = 1
-	costEvent         uint64 = 2
-	costDbRead        uint64 = 15
-	costDbWrite       uint64 = 40
-	costLog           uint64 = 5
+	gasExitCode         uint32 = 0xfffffff0
+	hostAbortExitCode   uint32 = 0xfffffff1
+	defaultGasLimit            = 50_000
+	defaultFunctionCost        = 50
+	costCheap           uint64 = 1
+	costEvent           uint64 = 2
+	costDbRead          uint64 = 15
+	costDbWrite         uint64 = 40
+	costLog             uint64 = 5
 )
 
 var (
@@ -44,12 +46,14 @@ var allowedEnvImports = map[string]struct{}{
 	"db_put_u64":           {},
 	"log":                  {},
 	"abort":                {},
+	"gas":                  {},
 }
 
 // StrategyLimits configures execution guard rails for a single strategy.
 type StrategyLimits struct {
-	GasLimit uint64
-	Timeout  time.Duration
+	GasLimit         uint64
+	Timeout          time.Duration
+	FunctionCallCost uint64
 }
 
 // hostEnv backs the env.* host functions consumed by AssemblyScript strategies.
@@ -57,10 +61,10 @@ type hostEnv struct {
 	logger *zerolog.Logger
 	db     kv.RwDB
 
-	mu       sync.RWMutex
-	blockCtx BlockContext
-	gasLimit uint64
-	gasUsed  uint64
+	mu           sync.RWMutex
+	blockCtx     BlockContext
+	gasLimit     uint64
+	gasRemaining uint64
 }
 
 func newHostEnv(logger *zerolog.Logger, db kv.RwDB) *hostEnv {
@@ -71,7 +75,7 @@ func (h *hostEnv) prepare(ctx BlockContext, gasLimit uint64) {
 	h.mu.Lock()
 	h.blockCtx = ctx
 	h.gasLimit = gasLimit
-	h.gasUsed = 0
+	h.gasRemaining = gasLimit
 	h.mu.Unlock()
 }
 
@@ -111,6 +115,10 @@ func (h *hostEnv) register(ctx context.Context, runtime wazero.Runtime) error {
 		Export("log")
 
 	builder.NewFunctionBuilder().
+		WithGoModuleFunction(api.GoModuleFunc(h.gas), []api.ValueType{api.ValueTypeI64}, []api.ValueType{}).
+		Export("gas")
+
+	builder.NewFunctionBuilder().
 		WithGoModuleFunction(api.GoModuleFunc(h.abort), []api.ValueType{
 			api.ValueTypeI32,
 			api.ValueTypeI32,
@@ -132,24 +140,22 @@ func (h *hostEnv) snapshot() BlockContext {
 }
 
 func (h *hostEnv) charge(ctx context.Context, mod api.Module, cost uint64, reason string) {
-	if cost == 0 {
+	if cost == 0 || h.gasLimit == 0 {
 		return
 	}
 
 	h.mu.Lock()
-	h.gasUsed += cost
-	limit := h.gasLimit
-	used := h.gasUsed
-	h.mu.Unlock()
-
-	if limit == 0 || used <= limit {
+	if h.gasRemaining >= cost {
+		h.gasRemaining -= cost
+		h.mu.Unlock()
 		return
 	}
+	h.gasRemaining = 0
+	h.mu.Unlock()
 
 	h.logger.Warn().
 		Uint64("cost", cost).
-		Uint64("used", used).
-		Uint64("limit", limit).
+		Uint64("limit", h.gasLimit).
 		Str("reason", reason).
 		Msg("strategy gas limit exceeded")
 
@@ -303,6 +309,11 @@ func (h *hostEnv) trap(ctx context.Context, mod api.Module, code uint32) {
 	panic(sys.NewExitError(code))
 }
 
+func (h *hostEnv) gas(ctx context.Context, mod api.Module, stack []uint64) {
+	cost := uint64(api.DecodeU32(stack[0]))
+	h.charge(ctx, mod, cost, "guest")
+}
+
 // StrategyModule wraps a single WASM module instance plus host wiring.
 type StrategyModule struct {
 	id      string
@@ -339,7 +350,20 @@ func NewStrategyModule(ctx context.Context, cfg ModuleConfig) (*StrategyModule, 
 		return nil, fmt.Errorf("register host env: %w", err)
 	}
 
-	compiled, err := runtime.CompileModule(ctx, cfg.Wasm)
+	limits := cfg.Limits
+	if limits.GasLimit == 0 {
+		limits.GasLimit = defaultGasLimit
+	}
+	if limits.FunctionCallCost == 0 {
+		limits.FunctionCallCost = defaultFunctionCost
+	}
+
+	listenerCtx := experimental.WithFunctionListenerFactory(ctx, &gasListenerFactory{
+		host: host,
+		cost: limits.FunctionCallCost,
+	})
+
+	compiled, err := runtime.CompileModule(listenerCtx, cfg.Wasm)
 	if err != nil {
 		return nil, fmt.Errorf("compile strategy wasm: %w", err)
 	}
@@ -349,14 +373,9 @@ func NewStrategyModule(ctx context.Context, cfg ModuleConfig) (*StrategyModule, 
 	}
 
 	moduleConfig := wazero.NewModuleConfig().WithName(fmt.Sprintf("strategy-%s", cfg.ID))
-	module, err := runtime.InstantiateModule(ctx, compiled, moduleConfig)
+	module, err := runtime.InstantiateModule(listenerCtx, compiled, moduleConfig)
 	if err != nil {
 		return nil, fmt.Errorf("instantiate strategy wasm: %w", err)
-	}
-
-	limits := cfg.Limits
-	if limits.GasLimit == 0 {
-		limits.GasLimit = defaultGasLimit
 	}
 
 	return &StrategyModule{
