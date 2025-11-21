@@ -9,18 +9,26 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	mdbxlog "github.com/ledgerwatch/log/v3"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+	"github.com/tetratelabs/wazero"
 
 	"github.com/0xAtelerix/example/application"
 )
 
 //go:embed testdata/uniswap_strategy.wasm
 var testStrategyWasm []byte
+
+//go:embed testdata/forbidden_import.wasm
+var testForbiddenImport []byte
+
+//go:embed testdata/memory_import.wasm
+var testMemoryImport []byte
 
 func newTestDB(t *testing.T) kv.RwDB {
 	t.Helper()
@@ -91,6 +99,10 @@ func newStrategyModule(t *testing.T, ctx context.Context, db kv.RwDB, sink *byte
 		Wasm:   testStrategyWasm,
 		DB:     db,
 		Logger: &logger,
+		Limits: StrategyLimits{
+			GasLimit: 5000,
+			Timeout:  time.Second,
+		},
 	})
 	require.NoError(t, err)
 
@@ -120,7 +132,7 @@ func TestStrategyModuleWritesSlotOnEvent(t *testing.T) {
 
 	value := readSlot(t, ctx, db, SlotLastUniTransferBlock)
 	require.Equal(t, blockNumber, value, "strategy should persist last observed block number")
-	require.Contains(t, logs.String(), "Uniswap ERC20 transfer detected", "expected info log from WASM strategy")
+	require.Contains(t, logs.String(), "Uniswap transfer at block", "expected info log from WASM strategy")
 }
 
 func TestStrategyModuleLogsStaleTransferWarning(t *testing.T) {
@@ -143,6 +155,49 @@ func TestStrategyModuleLogsStaleTransferWarning(t *testing.T) {
 	value := readSlot(t, ctx, db, SlotLastUniTransferBlock)
 	require.Equal(t, lastSeen, value, "slot should remain unchanged when no transfer is seen")
 
-	expected := fmt.Sprintf("No Uniswap transfers observed since block %d", lastSeen)
+	expected := fmt.Sprintf("No Uniswap transfers since block %d", lastSeen)
 	require.Truef(t, strings.Contains(logs.String(), expected), "expected stale warning log containing %q", expected)
+}
+
+func TestStrategyModuleGasLimitExceeded(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	var logs bytes.Buffer
+
+	module := newStrategyModule(t, ctx, db, &logs)
+	module.limits = StrategyLimits{GasLimit: 1, Timeout: time.Second}
+
+	err := module.OnBlock(ctx, BlockContext{
+		BlockNumber: 1,
+		ChainID:     42,
+	})
+	require.ErrorIs(t, err, errGasLimitExceeded)
+}
+
+func TestValidateModuleRejectsUnknownImports(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	t.Cleanup(func() {
+		_ = rt.Close(ctx)
+	})
+
+	module, err := rt.CompileModule(ctx, testForbiddenImport)
+	require.NoError(t, err)
+
+	err = validateModule(module)
+	require.EqualError(t, err, "import env.evil is not allowed")
+}
+
+func TestValidateModuleRejectsMemoryImports(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	t.Cleanup(func() {
+		_ = rt.Close(ctx)
+	})
+
+	module, err := rt.CompileModule(ctx, testMemoryImport)
+	require.NoError(t, err)
+
+	err = validateModule(module)
+	require.EqualError(t, err, "imported memories are not supported")
 }

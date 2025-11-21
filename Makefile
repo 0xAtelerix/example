@@ -1,4 +1,9 @@
 VERSION=v2.4.0
+ASC=npx --prefix as asc
+WASM_TESTDATA_DIR=wasmstrategy/testdata
+WASM_TESTDATA=$(WASM_TESTDATA_DIR)/uniswap_strategy.wasm \
+	$(WASM_TESTDATA_DIR)/forbidden_import.wasm \
+	$(WASM_TESTDATA_DIR)/memory_import.wasm
 
 run:
 	go run cmd/main.go \
@@ -33,10 +38,21 @@ tidy:
 	go mod tidy
 
 wasm-deps:
-	npm --prefix as install
+	npm --prefix as ci
 
 wasm-build: wasm-deps
 	npm --prefix as run build
+
+wasm-testdata: wasm-deps $(WASM_TESTDATA)
+
+$(WASM_TESTDATA_DIR)/uniswap_strategy.wasm: $(WASM_TESTDATA_DIR)/as/uniswap_strategy.ts
+	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert -o $@
+
+$(WASM_TESTDATA_DIR)/forbidden_import.wasm: $(WASM_TESTDATA_DIR)/as/forbidden_import.ts
+	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert -o $@
+
+$(WASM_TESTDATA_DIR)/memory_import.wasm: $(WASM_TESTDATA_DIR)/as/memory_import.ts
+	$(ASC) $< --runtime stub --optimize --shrinkLevel 2 --noAssert --importMemory -o $@
 
 tests:
 	go test -short -timeout 20m -failfast -shuffle=on -v ./... $(params)

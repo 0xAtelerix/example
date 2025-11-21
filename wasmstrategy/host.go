@@ -3,17 +3,54 @@ package wasmstrategy
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/rs/zerolog"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/sys"
 
 	"github.com/0xAtelerix/example/application"
 )
+
+const (
+	gasExitCode       uint32 = 0xfffffff0
+	hostAbortExitCode uint32 = 0xfffffff1
+	defaultGasLimit          = 50_000
+	costCheap         uint64 = 1
+	costEvent         uint64 = 2
+	costDbRead        uint64 = 15
+	costDbWrite       uint64 = 40
+	costLog           uint64 = 5
+)
+
+var (
+	errGasLimitExceeded = errors.New("strategy gas limit exceeded")
+	errNoEntryPoint     = errors.New("strategy does not export on_block")
+)
+
+var allowedEnvImports = map[string]struct{}{
+	"get_block_number":     {},
+	"get_chain_id":         {},
+	"get_event_count":      {},
+	"get_event_kind":       {},
+	"get_event_address_id": {},
+	"db_get_u64":           {},
+	"db_put_u64":           {},
+	"log":                  {},
+	"abort":                {},
+}
+
+// StrategyLimits configures execution guard rails for a single strategy.
+type StrategyLimits struct {
+	GasLimit uint64
+	Timeout  time.Duration
+}
 
 // hostEnv backs the env.* host functions consumed by AssemblyScript strategies.
 type hostEnv struct {
@@ -22,15 +59,19 @@ type hostEnv struct {
 
 	mu       sync.RWMutex
 	blockCtx BlockContext
+	gasLimit uint64
+	gasUsed  uint64
 }
 
 func newHostEnv(logger *zerolog.Logger, db kv.RwDB) *hostEnv {
 	return &hostEnv{logger: logger, db: db}
 }
 
-func (h *hostEnv) setContext(ctx BlockContext) {
+func (h *hostEnv) prepare(ctx BlockContext, gasLimit uint64) {
 	h.mu.Lock()
 	h.blockCtx = ctx
+	h.gasLimit = gasLimit
+	h.gasUsed = 0
 	h.mu.Unlock()
 }
 
@@ -90,19 +131,48 @@ func (h *hostEnv) snapshot() BlockContext {
 	return h.blockCtx
 }
 
-func (h *hostEnv) getBlockNumber(_ context.Context, _ api.Module, stack []uint64) {
+func (h *hostEnv) charge(ctx context.Context, mod api.Module, cost uint64, reason string) {
+	if cost == 0 {
+		return
+	}
+
+	h.mu.Lock()
+	h.gasUsed += cost
+	limit := h.gasLimit
+	used := h.gasUsed
+	h.mu.Unlock()
+
+	if limit == 0 || used <= limit {
+		return
+	}
+
+	h.logger.Warn().
+		Uint64("cost", cost).
+		Uint64("used", used).
+		Uint64("limit", limit).
+		Str("reason", reason).
+		Msg("strategy gas limit exceeded")
+
+	h.trap(ctx, mod, gasExitCode)
+}
+
+func (h *hostEnv) getBlockNumber(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costCheap, "get_block_number")
 	stack[0] = h.snapshot().BlockNumber
 }
 
-func (h *hostEnv) getChainID(_ context.Context, _ api.Module, stack []uint64) {
+func (h *hostEnv) getChainID(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costCheap, "get_chain_id")
 	stack[0] = uint64(h.snapshot().ChainID)
 }
 
-func (h *hostEnv) getEventCount(_ context.Context, _ api.Module, stack []uint64) {
+func (h *hostEnv) getEventCount(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costCheap, "get_event_count")
 	stack[0] = uint64(uint32(len(h.snapshot().Events)))
 }
 
-func (h *hostEnv) getEventKind(_ context.Context, _ api.Module, stack []uint64) {
+func (h *hostEnv) getEventKind(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costEvent, "get_event_kind")
 	idx := int32(int64(stack[0]))
 	events := h.snapshot().Events
 	if idx < 0 || int(idx) >= len(events) {
@@ -114,7 +184,8 @@ func (h *hostEnv) getEventKind(_ context.Context, _ api.Module, stack []uint64) 
 	stack[0] = uint64(uint32(events[idx].Kind))
 }
 
-func (h *hostEnv) getEventAddressID(_ context.Context, _ api.Module, stack []uint64) {
+func (h *hostEnv) getEventAddressID(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costEvent, "get_event_address_id")
 	idx := int32(int64(stack[0]))
 	events := h.snapshot().Events
 	if idx < 0 || int(idx) >= len(events) {
@@ -133,7 +204,8 @@ func (h *hostEnv) slotKey(slot int32) []byte {
 	return k[:]
 }
 
-func (h *hostEnv) dbGetU64(ctx context.Context, _ api.Module, stack []uint64) {
+func (h *hostEnv) dbGetU64(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costDbRead, "db_get_u64")
 	slot := int32(int64(stack[0]))
 	key := h.slotKey(slot)
 
@@ -160,7 +232,8 @@ func (h *hostEnv) dbGetU64(ctx context.Context, _ api.Module, stack []uint64) {
 	stack[0] = val
 }
 
-func (h *hostEnv) dbPutU64(ctx context.Context, _ api.Module, stack []uint64) {
+func (h *hostEnv) dbPutU64(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costDbWrite, "db_put_u64")
 	slot := int32(int64(stack[0]))
 	value := stack[1]
 	key := h.slotKey(slot)
@@ -175,7 +248,8 @@ func (h *hostEnv) dbPutU64(ctx context.Context, _ api.Module, stack []uint64) {
 	}
 }
 
-func (h *hostEnv) log(_ context.Context, mod api.Module, stack []uint64) {
+func (h *hostEnv) log(ctx context.Context, mod api.Module, stack []uint64) {
+	h.charge(ctx, mod, costLog, "log")
 	level := int32(int64(stack[0]))
 	ptr := uint32(stack[1])
 	length := uint32(stack[2])
@@ -208,7 +282,7 @@ func (h *hostEnv) log(_ context.Context, mod api.Module, stack []uint64) {
 	}
 }
 
-func (h *hostEnv) abort(_ context.Context, mod api.Module, stack []uint64) {
+func (h *hostEnv) abort(ctx context.Context, mod api.Module, stack []uint64) {
 	messagePtr := uint32(stack[0])
 	filePtr := uint32(stack[1])
 	line := uint32(stack[2])
@@ -221,7 +295,12 @@ func (h *hostEnv) abort(_ context.Context, mod api.Module, stack []uint64) {
 		Uint32("column", column).
 		Msg("wasm abort invoked")
 
-	panic(fmt.Sprintf("wasm abort (%d:%d)", line, column))
+	h.trap(ctx, mod, hostAbortExitCode)
+}
+
+func (h *hostEnv) trap(ctx context.Context, mod api.Module, code uint32) {
+	_ = mod.CloseWithExitCode(ctx, code)
+	panic(sys.NewExitError(code))
 }
 
 // StrategyModule wraps a single WASM module instance plus host wiring.
@@ -230,6 +309,7 @@ type StrategyModule struct {
 	runtime wazero.Runtime
 	module  api.Module
 	host    *hostEnv
+	limits  StrategyLimits
 }
 
 // ModuleConfig configures a StrategyModule instance.
@@ -238,6 +318,7 @@ type ModuleConfig struct {
 	Wasm   []byte
 	DB     kv.RwDB
 	Logger *zerolog.Logger
+	Limits StrategyLimits
 }
 
 // NewStrategyModule compiles and instantiates the WASM strategy and host functions.
@@ -263,9 +344,19 @@ func NewStrategyModule(ctx context.Context, cfg ModuleConfig) (*StrategyModule, 
 		return nil, fmt.Errorf("compile strategy wasm: %w", err)
 	}
 
-	module, err := runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig())
+	if err := validateModule(compiled); err != nil {
+		return nil, err
+	}
+
+	moduleConfig := wazero.NewModuleConfig().WithName(fmt.Sprintf("strategy-%s", cfg.ID))
+	module, err := runtime.InstantiateModule(ctx, compiled, moduleConfig)
 	if err != nil {
 		return nil, fmt.Errorf("instantiate strategy wasm: %w", err)
+	}
+
+	limits := cfg.Limits
+	if limits.GasLimit == 0 {
+		limits.GasLimit = defaultGasLimit
 	}
 
 	return &StrategyModule{
@@ -273,6 +364,7 @@ func NewStrategyModule(ctx context.Context, cfg ModuleConfig) (*StrategyModule, 
 		runtime: runtime,
 		module:  module,
 		host:    host,
+		limits:  limits,
 	}, nil
 }
 
@@ -291,18 +383,71 @@ func (s *StrategyModule) Close(ctx context.Context) error {
 
 // OnBlock invokes the exported on_block handler with the provided context.
 func (s *StrategyModule) OnBlock(ctx context.Context, block BlockContext) error {
-	s.host.setContext(block)
+	s.host.prepare(block, s.limits.GasLimit)
+
+	execCtx := ctx
+	cancel := func() {}
+	if s.limits.Timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, s.limits.Timeout)
+	}
+	defer cancel()
 
 	exported := s.module.ExportedFunction("on_block")
 	if exported == nil {
-		return fmt.Errorf("strategy %s does not export on_block", s.id)
+		return fmt.Errorf("%s: %w", s.id, errNoEntryPoint)
 	}
 
-	_, err := exported.Call(ctx)
+	_, err := exported.Call(execCtx)
+	if err == nil {
+		return nil
+	}
+
+	var exitErr *sys.ExitError
+	if errors.As(err, &exitErr) {
+		switch exitErr.ExitCode() {
+		case gasExitCode:
+			return errGasLimitExceeded
+		case hostAbortExitCode:
+			return fmt.Errorf("strategy %s aborted execution", s.id)
+		case sys.ExitCodeDeadlineExceeded:
+			return fmt.Errorf("strategy %s timed out: %w", s.id, context.DeadlineExceeded)
+		case sys.ExitCodeContextCanceled:
+			return fmt.Errorf("strategy %s canceled: %w", s.id, context.Canceled)
+		default:
+			return exitErr
+		}
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("strategy %s timed out: %w", s.id, err)
+	}
 
 	return err
 }
 
 func normalizeAddress(addr string) string {
 	return strings.ToLower(addr)
+}
+
+func validateModule(compiled wazero.CompiledModule) error {
+	for _, fn := range compiled.ImportedFunctions() {
+		if _, _, imported := fn.Import(); !imported {
+			continue
+		}
+
+		moduleName, funcName, _ := fn.Import()
+		if moduleName != "env" {
+			return fmt.Errorf("imports from module %q are not allowed", moduleName)
+		}
+
+		if _, ok := allowedEnvImports[funcName]; !ok {
+			return fmt.Errorf("import env.%s is not allowed", funcName)
+		}
+	}
+
+	if mems := compiled.ImportedMemories(); len(mems) > 0 {
+		return fmt.Errorf("imported memories are not supported")
+	}
+
+	return nil
 }

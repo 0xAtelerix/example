@@ -7,8 +7,8 @@ import (
 	"flag"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
@@ -37,6 +37,11 @@ type RuntimeArgs struct {
 	RPCPort          string
 	MutlichainConfig gosdk.MultichainConfig
 	LogLevel         zerolog.Level
+	StrategyDir      string
+	StrategyReload   time.Duration
+	StrategyGasLimit uint64
+	StrategyTimeout  time.Duration
+	StrategyParallel int
 }
 
 func main() {
@@ -62,6 +67,11 @@ func RunCLI(ctx context.Context) {
 	rpcPort := fs.String("rpc-port", ":8080", "Port for the JSON-RPC server")
 	multichainConfigJSON := fs.String("multichain-config", "", "Multichain config JSON path")
 	logLevel := fs.Int("log-level", int(zerolog.InfoLevel), "Logging level")
+	strategyDir := fs.String("strategy-dir", "", "Directory containing strategy WASM modules")
+	strategyReload := fs.Duration("strategy-reload-interval", 5*time.Second, "Interval for rescanning the strategy directory")
+	strategyGasLimit := fs.Uint64("strategy-gas-limit", 100000, "Per-strategy gas limit when executing on_block")
+	strategyTimeout := fs.Duration("strategy-timeout", 50*time.Millisecond, "Per-strategy execution timeout")
+	strategyParallel := fs.Int("strategy-max-parallel", 4, "Maximum number of strategies executed in parallel")
 
 	if *logLevel > int(zerolog.Disabled) {
 		*logLevel = int(zerolog.DebugLevel)
@@ -94,6 +104,11 @@ func RunCLI(ctx context.Context) {
 		RPCPort:          *rpcPort,
 		LogLevel:         zerolog.Level(*logLevel),
 		MutlichainConfig: mcDbs,
+		StrategyDir:      *strategyDir,
+		StrategyReload:   *strategyReload,
+		StrategyGasLimit: *strategyGasLimit,
+		StrategyTimeout:  *strategyTimeout,
+		StrategyParallel: *strategyParallel,
 	}
 
 	Run(ctx, args, nil)
@@ -196,24 +211,33 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 	log.Info().Msg("Starting appchain...")
 
 	var strategyManager *wasmstrategy.Manager
-	strategyPath := filepath.Join("build", "strategy.wasm")
-	if info, errStat := os.Stat(strategyPath); errStat == nil && !info.IsDir() {
-		manager, err := wasmstrategy.NewManager(ctx, wasmstrategy.ManagerConfig{
-			Logger:      &log.Logger,
-			DB:          appchainDB,
-			Multichain:  msa,
-			WasmPath:    strategyPath,
-			AddressBook: wasmstrategy.DefaultAddressBook(),
-			ChainID:     apptypes.ChainType(ChainID),
-		})
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to initialize WASM strategy. continuing without it")
-		} else {
-			strategyManager = manager
-			defer strategyManager.Close(ctx)
+	if args.StrategyDir != "" {
+		if info, errStat := os.Stat(args.StrategyDir); errStat == nil && info.IsDir() {
+			manager, err := wasmstrategy.NewManager(ctx, wasmstrategy.ManagerConfig{
+				Logger:         &log.Logger,
+				DB:             appchainDB,
+				Multichain:     msa,
+				StrategyDir:    args.StrategyDir,
+				ReloadInterval: args.StrategyReload,
+				AddressBook:    wasmstrategy.DefaultAddressBook(),
+				ChainID:        apptypes.ChainType(ChainID),
+				Limits: wasmstrategy.StrategyLimits{
+					GasLimit: args.StrategyGasLimit,
+					Timeout:  args.StrategyTimeout,
+				},
+				MaxParallel: args.StrategyParallel,
+			})
+			if err != nil {
+				log.Warn().Err(err).Msg("Failed to initialize WASM strategy manager")
+			} else {
+				strategyManager = manager
+				defer strategyManager.Close(ctx)
+			}
+		} else if errStat != nil {
+			log.Warn().Err(errStat).Str("path", args.StrategyDir).Msg("Strategy directory unavailable, skipping WASM runtime")
 		}
 	} else {
-		log.Warn().Err(errStat).Str("path", strategyPath).Msg("No WASM strategy found, skipping runtime")
+		log.Debug().Msg("No strategy directory configured, skipping WASM runtime")
 	}
 
 	var appchainExample gosdk.Appchain[*gosdk.BatchProcesser[application.Transaction[application.Receipt], application.Receipt], application.Transaction[application.Receipt], application.Receipt, *application.Block]
