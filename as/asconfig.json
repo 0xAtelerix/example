@@ -1,0 +1,22 @@
+{
+  "targets": {
+    "debug": {
+      "optimizeLevel": 0,
+      "shrinkLevel": 0,
+      "debug": true,
+      "outFile": "../build/strategy.debug.wasm"
+    },
+    "release": {
+      "optimizeLevel": 3,
+      "shrinkLevel": 2,
+      "noAssert": true,
+      "converge": false,
+      "outFile": "../build/strategy.wasm"
+    }
+  },
+  "options": {
+    "runtime": "stub",
+    "exportTable": true,
+    "exportMemory": true
+  }
+}

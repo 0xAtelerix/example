@@ -32,6 +32,12 @@ clean:
 tidy:
 	go mod tidy
 
+wasm-deps:
+	npm --prefix as install
+
+wasm-build: wasm-deps
+	npm --prefix as run build
+
 tests:
 	go test -short -timeout 20m -failfast -shuffle=on -v ./... $(params)
 

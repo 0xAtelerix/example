@@ -7,3 +7,4 @@ pelacli_data/
 test_consensus/
 test_consensus_app/
 multichain/
+as/node_modules/

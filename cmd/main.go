@@ -7,9 +7,11 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/0xAtelerix/sdk/gosdk"
+	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/0xAtelerix/sdk/gosdk/rpc"
 	"github.com/0xAtelerix/sdk/gosdk/txpool"
 	"github.com/fxamacker/cbor/v2"
@@ -21,6 +23,7 @@ import (
 
 	"github.com/0xAtelerix/example/application"
 	"github.com/0xAtelerix/example/application/api"
+	"github.com/0xAtelerix/example/wasmstrategy"
 )
 
 const ChainID = 42
@@ -192,16 +195,52 @@ func Run(ctx context.Context, args RuntimeArgs, _ chan<- int) {
 
 	log.Info().Msg("Starting appchain...")
 
-	appchainExample := gosdk.NewAppchain(
-		stateTransition,
-		application.BlockConstructor,
-		txPool,
-		config,
-		appchainDB,
-		subs,
-		msa,
-		txBatchDB,
-	)
+	var strategyManager *wasmstrategy.Manager
+	strategyPath := filepath.Join("build", "strategy.wasm")
+	if info, errStat := os.Stat(strategyPath); errStat == nil && !info.IsDir() {
+		manager, err := wasmstrategy.NewManager(ctx, wasmstrategy.ManagerConfig{
+			Logger:      &log.Logger,
+			DB:          appchainDB,
+			Multichain:  msa,
+			WasmPath:    strategyPath,
+			AddressBook: wasmstrategy.DefaultAddressBook(),
+			ChainID:     apptypes.ChainType(ChainID),
+		})
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to initialize WASM strategy. continuing without it")
+		} else {
+			strategyManager = manager
+			defer strategyManager.Close(ctx)
+		}
+	} else {
+		log.Warn().Err(errStat).Str("path", strategyPath).Msg("No WASM strategy found, skipping runtime")
+	}
+
+	var appchainExample gosdk.Appchain[*gosdk.BatchProcesser[application.Transaction[application.Receipt], application.Receipt], application.Transaction[application.Receipt], application.Receipt, *application.Block]
+	if strategyManager != nil {
+		appchainExample = gosdk.NewAppchain(
+			stateTransition,
+			application.BlockConstructor,
+			txPool,
+			config,
+			appchainDB,
+			subs,
+			msa,
+			txBatchDB,
+			gosdk.WithBlockObservers[*gosdk.BatchProcesser[application.Transaction[application.Receipt], application.Receipt], application.Transaction[application.Receipt], application.Receipt, *application.Block](strategyManager),
+		)
+	} else {
+		appchainExample = gosdk.NewAppchain(
+			stateTransition,
+			application.BlockConstructor,
+			txPool,
+			config,
+			appchainDB,
+			subs,
+			msa,
+			txBatchDB,
+		)
+	}
 
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to start appchain")

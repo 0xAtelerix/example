@@ -12,6 +12,7 @@ require (
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
+	github.com/tetratelabs/wazero v1.8.1
 )
 
 require (
