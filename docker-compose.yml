@@ -32,6 +32,8 @@ services:
       - ./config/consensus_chains.json:/consensus_chains.json:ro
       - ./config/ext_networks.json:/ext_networks.json:ro
       - ./multichain:/multichain
+    ports:
+      - "8081:8081"
     command:
       - consensus
       - --snapshot-dir=/consensus_data
@@ -40,4 +42,5 @@ services:
       - --multichain-dir=/consensus_data/multichain_db
       - --chains-json=/consensus_chains.json
       - --ext-txn-config-json=/ext_networks.json
+      - --api-port=8081
 
