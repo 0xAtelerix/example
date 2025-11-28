@@ -110,12 +110,14 @@ func (e Transaction[R]) Process(
 
 	// Generate external transaction if requested
 	var externalTxs []apptypes.ExternalTransaction
+
 	if e.GenerateExtTxn {
 		extTx, err := e.createExternalTransaction()
 		if err != nil {
 			// Log error but don't fail the transaction
 			return e.failedReceipt(err), nil, nil
 		}
+
 		externalTxs = append(externalTxs, extTx)
 	}
 
