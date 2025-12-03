@@ -8,7 +8,7 @@ services:
     volumes:
       - ./pelacli_data:/consensus_data
       - ./app_data:/data
-      - ./config/chain_data.json:/data/chain_data.json:ro
+      - ./config/chain_data.json:/config/chain_data.json:ro
       - ./multichain:/multichain
     ports:
       - "9090:9090"
@@ -22,7 +22,7 @@ services:
       - --stream-dir=/consensus_data/events
       - --tx-dir=/consensus_data/fetcher/snapshots/42
       - --rpc-port=:8080
-      - --multichain-config=/data/chain_data.json
+      - --multichain-config=/config/chain_data.json
 
   pelacli:
     container_name: pelacli
@@ -32,6 +32,8 @@ services:
       - ./config/consensus_chains.json:/consensus_chains.json:ro
       - ./config/ext_networks.json:/ext_networks.json:ro
       - ./multichain:/multichain
+    ports:
+      - "8081:8081"
     command:
       - consensus
       - --snapshot-dir=/consensus_data
@@ -40,4 +42,16 @@ services:
       - --multichain-dir=/consensus_data/multichain_db
       - --chains-json=/consensus_chains.json
       - --ext-txn-config-json=/ext_networks.json
+      - --api-port=8081
+
+  explorer:
+    image: pelagosnetwork/explorer:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - RPC_URL=http://localhost:8080/rpc
+      - EXTERNAL_RPC_URL=http://localhost:8081/rpc
+    depends_on:
+      - appchain
+      - pelacli
 
