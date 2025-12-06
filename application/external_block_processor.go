@@ -7,6 +7,7 @@ import (
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
+	"github.com/0xAtelerix/sdk/gosdk/evmtypes"
 	"github.com/0xAtelerix/sdk/gosdk/external"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -56,31 +57,29 @@ const (
 		`"name":"WithdrawToSolana","type":"event"}]`
 )
 
-var (
-	_ gosdk.StateTransitionSimplified                               = &StateTransition{}
-	_ gosdk.StateTransitionInterface[Transaction[Receipt], Receipt] = gosdk.BatchProcesser[Transaction[Receipt], Receipt]{}
-)
+// Verify ExtBlockProcessor implements ExternalBlockProcessor interface.
+var _ gosdk.ExternalBlockProcessor = &ExtBlockProcessor{}
 
-type StateTransition struct {
-	msa *gosdk.MultichainStateAccess
+type ExtBlockProcessor struct {
+	msa gosdk.MultichainStateAccessor
 }
 
-func NewStateTransition(msa *gosdk.MultichainStateAccess) *StateTransition {
-	return &StateTransition{
+func NewExtBlockProcessor(msa gosdk.MultichainStateAccessor) *ExtBlockProcessor {
+	return &ExtBlockProcessor{
 		msa: msa,
 	}
 }
 
-// how to external chains blocks
-func (st *StateTransition) ProcessBlock(
+// ProcessBlock handles external chain blocks (EVM, Solana).
+func (p *ExtBlockProcessor) ProcessBlock(
 	b apptypes.ExternalBlock,
 	tx kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {
 	switch {
 	case gosdk.IsEvmChain(apptypes.ChainType(b.ChainID)):
-		return st.processEVMBlock(b, tx)
+		return p.processEVMBlock(b, tx)
 	case gosdk.IsSolanaChain(apptypes.ChainType(b.ChainID)):
-		return st.processSolanaBlock(b, tx)
+		return p.processSolanaBlock(b, tx)
 	default:
 		log.Warn().Uint64("chainID", b.ChainID).Msg("Unsupported external chain, skipping...")
 	}
@@ -88,13 +87,13 @@ func (st *StateTransition) ProcessBlock(
 	return nil, nil
 }
 
-func (st *StateTransition) processSolanaBlock(
+func (p *ExtBlockProcessor) processSolanaBlock(
 	b apptypes.ExternalBlock,
 	_ kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {
 	var externalTxs []apptypes.ExternalTransaction
 
-	solBlock, err := st.msa.SolanaBlock(context.Background(), b)
+	solBlock, err := p.msa.SolanaBlock(context.Background(), b)
 	if err != nil {
 		return nil, err
 	}
@@ -108,24 +107,24 @@ func (st *StateTransition) processSolanaBlock(
 	return externalTxs, nil
 }
 
-func (st *StateTransition) processEVMBlock(
+func (p *ExtBlockProcessor) processEVMBlock(
 	b apptypes.ExternalBlock,
 	dbtx kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {
 	var externalTxs []apptypes.ExternalTransaction
 
-	block, err := st.msa.EthBlock(context.Background(), b)
+	block, err := p.msa.EVMBlock(context.Background(), b)
 	if err != nil {
 		return nil, err
 	}
 
-	receipts, err := st.msa.EthReceipts(context.Background(), b)
+	receipts, err := p.msa.EVMReceipts(context.Background(), b)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, r := range receipts {
-		extTxs := st.processReceipt(dbtx, r, b.ChainID)
+		extTxs := p.processReceipt(dbtx, r, b.ChainID)
 		if len(extTxs) > 0 {
 			externalTxs = append(externalTxs, extTxs...)
 		}
@@ -143,9 +142,9 @@ func (st *StateTransition) processEVMBlock(
 
 // processReceipt handles Deposit events from the external chain
 // Just for example, In real use-case, handle according to your logic
-func (*StateTransition) processReceipt(
+func (*ExtBlockProcessor) processReceipt(
 	tx kv.RwTx,
-	r types.Receipt,
+	r evmtypes.Receipt,
 	chainID uint64,
 ) []apptypes.ExternalTransaction {
 	var externalTxs []apptypes.ExternalTransaction

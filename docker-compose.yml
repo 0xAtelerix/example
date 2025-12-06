@@ -1,43 +1,33 @@
 services:
+  pelacli:
+    container_name: pelacli
+    image: pelagosnetwork/pelacli:latest
+    working_dir: /app
+    volumes:
+      - ./data:/app/data
+      # Uncomment to use custom config:
+      # - ./pelacli.yaml:/app/pelacli.yaml
+    command:
+      - consensus
+      # Uncomment to use custom config:
+      # - --config=/app/pelacli.yaml
+
   appchain:
     build:
       context: .
       dockerfile: Dockerfile
+    working_dir: /app
     pid: "service:pelacli"
     image: appchain:latest
     volumes:
-      - ./pelacli_data:/consensus_data
-      - ./app_data:/data
-      - ./config/chain_data.json:/data/chain_data.json:ro
-      - ./multichain:/multichain
+      - ./data:/app/data
+      # Uncomment to use custom config:
+      # - ./config.yaml:/app/config.yaml
     ports:
       - "9090:9090"
       - "8080:8080"
     depends_on:
       - pelacli
-    command:
-      - --emitter-port=:9090
-      - --db-path=/data/appchain-db
-      - --local-db-path=/data/local-db
-      - --stream-dir=/consensus_data/events
-      - --tx-dir=/consensus_data/fetcher/snapshots/42
-      - --rpc-port=:8080
-      - --multichain-config=/data/chain_data.json
-
-  pelacli:
-    container_name: pelacli
-    image: pelagosnetwork/pelacli:latest
-    volumes:
-      - ./pelacli_data:/consensus_data
-      - ./config/consensus_chains.json:/consensus_chains.json:ro
-      - ./config/ext_networks.json:/ext_networks.json:ro
-      - ./multichain:/multichain
-    command:
-      - consensus
-      - --snapshot-dir=/consensus_data
-      - --appchain=42=appchain:9090
-      - --ask-period=1s
-      - --multichain-dir=/consensus_data/multichain_db
-      - --chains-json=/consensus_chains.json
-      - --ext-txn-config-json=/ext_networks.json
-
+    # Uncomment to use custom config:
+    # command:
+    #   - -config=/app/config.yaml

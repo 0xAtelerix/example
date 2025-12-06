@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -38,66 +37,72 @@ func waitUntil(ctx context.Context, f func() bool) error {
 	}
 }
 
-// TestEndToEnd spins up main(), posts a transaction to the /rpc endpoint and
+// TestEndToEnd spins up the appchain, posts a transaction to the /rpc endpoint and
 // verifies we get a 2xx response.
 func TestEndToEnd(t *testing.T) {
-	var err error
-
 	port := getFreePort(t)
+	dataDir := t.TempDir()
+	chainID := uint64(1001)
 
-	// temp dirs for clean DB state
-	tmp := t.TempDir()
-	dbPath := filepath.Join(tmp, "appchain.mdbx")
-	localDB := filepath.Join(tmp, "local.mdbx")
-	streamDir := filepath.Join(tmp, "stream")
-	txDir := filepath.Join(tmp, "tx")
+	// Create required directories and databases
+	// SDK's Init() expects these paths to exist
+	txBatchPath := gosdk.TxBatchPath(dataDir, chainID)
+	eventsPath := gosdk.EventsPath(dataDir)
 
-	// Create an empty MDBX database that can be opened in readonly mode
-	err = createEmptyMDBXDatabase(txDir, gosdk.TxBucketsTables())
+	require.NoError(t, os.MkdirAll(txBatchPath, 0o755))
+	require.NoError(t, os.MkdirAll(eventsPath, 0o755))
+
+	// Create TxBatchDB (normally created by pelacli's fetcher)
+	err := createEmptyMDBXDatabase(txBatchPath, gosdk.TxBucketsTables())
 	require.NoError(t, err, "create empty txBatch database")
 
-	// craft os.Args for main()
-	oldArgs := os.Args
+	// Create events file (normally created by pelacli)
+	eventsFile := filepath.Join(eventsPath, "epoch_1.data")
+	f, err := os.Create(eventsFile)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
 
-	defer func() { os.Args = oldArgs }()
-
-	os.Args = []string{
-		"appchain-test-binary",
-		"-rpc-port", fmt.Sprintf(":%d", port),
-		"-emitter-port", ":0", // 0 → let OS choose, we don’t care in the test
-		"-db-path", dbPath,
-		"-local-db-path", localDB,
-		"-stream-dir", streamDir,
-		"-tx-dir", txDir,
+	// Create config with test values
+	cfg := &Config{
+		ChainID:     chainID,
+		DataDir:     dataDir,
+		EmitterPort: ":0", // Let OS choose
+		RPCPort:     fmt.Sprintf(":%d", port),
 	}
 
-	go RunCLI(t.Context())
-
-	// wait until HTTP service is up
-	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/rpc", port)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Create cancellable context for the test
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	if err = waitUntil(ctx, func() bool {
-		// GET is fine; we only care the port is bound.
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, http.MethodGet, rpcURL, nil)
-		require.NoError(t, err, "GET req /rpc")
+	// Run appchain in background
+	go func() {
+		_ = Run(ctx, cfg)
+	}()
 
-		var resp *http.Response
-		resp, err = http.DefaultClient.Do(req)
-		require.NoError(t, err, "GET res /rpc")
+	// Wait until HTTP service is up
+	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/rpc", port)
 
-		err = resp.Body.Close()
-		require.NoError(t, err)
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+
+	err = waitUntil(waitCtx, func() bool {
+		req, reqErr := http.NewRequestWithContext(waitCtx, http.MethodGet, rpcURL, nil)
+		if reqErr != nil {
+			return false
+		}
+
+		resp, respErr := http.DefaultClient.Do(req)
+		if respErr != nil {
+			return false
+		}
+
+		_ = resp.Body.Close()
 
 		return true
-	}); err != nil {
-		t.Fatalf("JSON-RPC service never became ready: %v", err)
-	}
+	})
+	require.NoError(t, err, "JSON-RPC service never became ready")
 
-	// build & send a transaction
+	// Build & send a transaction
 	tx := application.Transaction[application.Receipt]{
 		Sender: "Vasya",
 		Value:  42,
@@ -105,12 +110,12 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err = json.NewEncoder(&buf).Encode(tx); err != nil {
-		t.Fatalf("encode tx: %v", err)
-	}
+
+	err = json.NewEncoder(&buf).Encode(tx)
+	require.NoError(t, err, "encode tx")
 
 	req, err := http.NewRequestWithContext(
-		ctx,
+		waitCtx,
 		http.MethodPost,
 		rpcURL,
 		bytes.NewReader(buf.Bytes()),
@@ -126,18 +131,13 @@ func TestEndToEnd(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 	}()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		t.Fatalf("unexpected HTTP status: %s", resp.Status)
-	}
+	require.True(t, resp.StatusCode >= 200 && resp.StatusCode < 300,
+		"unexpected HTTP status: %s", resp.Status)
 
-	// graceful shutdown
-	// The real program listens for SIGINT/SIGTERM,
-	// so use the same mechanism to drain goroutines.
-	proc, _ := os.FindProcess(os.Getpid())
-	_ = proc.Signal(syscall.SIGINT)
+	// Cancel context to trigger graceful shutdown
+	cancel()
 
-	// Give main() a moment to tear down so the test runner’s
-	// goroutine leak detector stays quiet.
+	// Give Run() a moment to tear down
 	time.Sleep(500 * time.Millisecond)
 
 	t.Log("Success!")
@@ -162,7 +162,7 @@ func getFreePort(t *testing.T) int {
 	return port
 }
 
-// createEmptyMDBXDatabase creates an empty MDBX database that can be opened in readonly mode
+// createEmptyMDBXDatabase creates an empty MDBX database that can be opened in readonly mode.
 func createEmptyMDBXDatabase(dbPath string, tableCfg kv.TableCfg) error {
 	tempDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(dbPath).

@@ -1,0 +1,36 @@
+# =============================================================================
+# APPCHAIN CONFIGURATION
+# =============================================================================
+# Copy this file to config.yaml and modify as needed.
+# All fields are optional - defaults will be used if not specified.
+#
+# Run with: ./appchain --config=config.yaml
+# =============================================================================
+
+# Unique identifier for this appchain
+# Must match the chain_id in pelacli's appchains config
+# Default: 42
+chain_id: 42
+
+# Root data directory shared with pelacli
+# Both appchain and pelacli must use the same data_dir for communication
+# Default: ./data
+data_dir: "./data"
+
+# gRPC port for emitter API
+# Pelacli's fetcher connects to this port to fetch tx batches and checkpoints
+# Default: :9090
+emitter_port: ":9090"
+
+# HTTP port for JSON-RPC server
+# Clients connect to this port to submit transactions and query state
+# Default: :8080
+rpc_port: ":8080"
+
+# Log level for application logging
+# 0 = debug (most verbose)
+# 1 = info (default)
+# 2 = warn
+# 3 = error (least verbose)
+# Default: 1
+log_level: 1
