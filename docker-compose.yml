@@ -7,6 +7,8 @@ services:
       - ./data:/app/data
       # Uncomment to use custom config:
       # - ./pelacli.yaml:/app/pelacli.yaml
+    ports:
+      - "8081:8081" #Default API-port, Use config to change
     command:
       - consensus
       # Uncomment to use custom config:
@@ -31,3 +33,14 @@ services:
     # Uncomment to use custom config:
     # command:
     #   - -config=/app/config.yaml
+
+  explorer:
+    image: pelagosnetwork/explorer:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - RPC_URL=http://localhost:8080/rpc
+      - EXTERNAL_RPC_URL=http://localhost:8081/rpc
+    depends_on:
+      - appchain
+      - pelacli
