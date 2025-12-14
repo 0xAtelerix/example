@@ -1,0 +1,121 @@
+# =============================================================================
+# PELACLI CONFIGURATION
+# =============================================================================
+# Copy this file to pelacli.yaml and modify as needed.
+# All fields are optional - defaults will be used if not specified.
+#
+# Run with: pelacli consensus --config=pelacli.yaml
+# =============================================================================
+
+# Root data directory for all pelacli data (events, fetcher, multichain)
+# Must match appchain's data_dir for communication
+# Default: ./data
+data_dir: "./data"
+
+# =============================================================================
+# CONSENSUS SETTINGS
+# =============================================================================
+consensus:
+  # How often to poll appchain for new transactions
+  # Default: 100ms
+  ask_period: 100ms
+
+  # Port for fetcher gRPC server (internal communication)
+  # Default: 8088
+  fetcher_port: 8088
+
+# =============================================================================
+# API SERVER SETTINGS
+# =============================================================================
+api:
+  # Port for external transactions REST API (for explorer, etc.)
+  # Set to 0 to disable the API server
+  # Default: 8081
+  port: 8081
+
+# =============================================================================
+# AVAIL DA SETTINGS (Data Availability Layer)
+# =============================================================================
+# Leave api_key empty to disable Avail DA integration
+avail_da:
+  # Avail Turbo API key (empty = disabled)
+  # Get your API key from: https://turbo.availproject.org
+  api_key: ""
+
+  # Avail Turbo API URL
+  # Default: https://staging.turbo-api.availproject.org
+  url: "https://staging.turbo-api.availproject.org"
+
+# =============================================================================
+# APPCHAIN CONNECTIONS
+# =============================================================================
+# Configure which appchains pelacli should connect to for fetching transactions.
+# If not specified, defaults to chain_id=42 at :9090 (SDK's DefaultAppchainID)
+#
+# appchains:
+#   - chain_id: 42
+#     address: ":9090"    # gRPC address of appchain's emitter
+
+# =============================================================================
+# READ CHAINS - WSS connections for reading external chain blocks (oracle)
+# =============================================================================
+# If not specified, defaults to Sepolia + Amoy with built-in WSS endpoints.
+# DBPath is auto-computed from data_dir (e.g., ./data/multichain/11155111/).
+# You can add any EVM or SVM compatible chain here.
+#
+# Block offset values:
+#   -4 = safe (2 blocks behind latest)
+#   -3 = finalized (most secure, ~15 min delay on Ethereum)
+#   -2 = latest (no delay, default for testnets)
+#   -1 = pending
+#    0 = not set (uses default: -3 finalized for core, -2 latest for pelacli)
+#   1+ = fixed offset from latest (e.g., 2 means if latest is block X, you get X-2)
+#
+# read_chains:
+#   - chain_id: 11155111            # Ethereum Sepolia
+#     api_key: "wss://my-custom-sepolia-endpoint.com"
+#     start_block: 0                # 0 = start from latest block or give specific block number
+#     block_offset: -2              # -3=finalized, -2=latest, -4=safe
+#     blocks_to_keep: 0             # 0 = no pruning (keep all blocks)
+#     prune_interval_seconds: 0     # 0 = default (5 minutes)
+#
+#   - chain_id: 80002               # Polygon Amoy
+#     api_key: "wss://my-custom-amoy-endpoint.com"
+#     start_block: 0
+#     block_offset: -2
+#     blocks_to_keep: 1000          # Keep last 1000 blocks
+#     prune_interval_seconds: 300   # Prune every 5 minutes
+
+# =============================================================================
+# WRITE CHAINS - RPC connections for sending transactions to external chains
+# =============================================================================
+# If not specified, defaults to Sepolia + Amoy with built-in RPC endpoints.
+# Configure to send cross-chain transactions to external blockchains.
+#
+# write_chains:
+#   # Override Sepolia with your own RPC and key
+#   - chain_id: 11155111
+#     rpc_url: "https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+#     private_key: "your-private-key-hex-without-0x-prefix"
+#     pelagos_contract: "0x922e02fFbDe8ABbF3058ccC3f9433018A2ff8C1d"
+#
+#   # Override Polygon Amoy with your own RPC and key
+#   - chain_id: 80002
+#     rpc_url: "https://polygon-amoy.g.alchemy.com/v2/YOUR_API_KEY"
+#     private_key: "your-private-key-hex-without-0x-prefix"
+#     pelagos_contract: "0x98D34a83c45FEae289f6FA72ba009Ad49F3D26ED"
+#
+#   # Add a custom chain not in defaults
+#   - chain_id: 421614    # Arbitrum Sepolia
+#     rpc_url: "https://arb-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+#     private_key: "your-private-key-hex"
+#     pelagos_contract: "0xYourPelagosContractAddress"
+
+# =============================================================================
+# DEFAULT PELAGOS CONTRACT ADDRESSES (for reference, They might change)
+# =============================================================================
+# Ethereum Sepolia (11155111): 0x922e02fFbDe8ABbF3058ccC3f9433018A2ff8C1d
+# Polygon Amoy (80002):        0x98D34a83c45FEae289f6FA72ba009Ad49F3D26ED
+#
+# Deploy your own Pelagos and AppChain contracts using:
+# https://github.com/0xAtelerix/sdk/tree/main/contracts
