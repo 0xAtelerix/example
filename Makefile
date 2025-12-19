@@ -73,7 +73,7 @@ ci-down:
 	$(COMPOSE_CI) down
 
 ci-clean:
-	rm -Rdf appchain multichain test_consensus_app test_consensus app_data pelacli_data
+	docker run --rm -v $(PWD):/data alpine rm -rf /data/appchain /data/multichain /data/test_consensus_app /data/test_consensus /data/app_data /data/pelacli_data
 
 ci-logs:
 	$(COMPOSE_CI) logs
