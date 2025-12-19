@@ -1,0 +1,19 @@
+# CI overrides - use with: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
+services:
+  appchain:
+    command:
+      - --emitter-port=:9090
+      - --db-path=/data/appchain-db
+      - --local-db-path=/data/local-db
+      - --stream-dir=/consensus_data/events
+      - --tx-dir=/consensus_data/fetcher/snapshots/42
+      - --rpc-port=:8080
+
+  pelacli:
+    pull_policy: always
+    command:
+      - consensus
+      - --snapshot-dir=/consensus_data
+      - --appchain=42=appchain:9090
+      - --ask-period=1s
+      - --api-port=8081

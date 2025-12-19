@@ -461,8 +461,10 @@ echo -e "━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 if [ $FAILED_TESTS -eq 0 ]; then
     print_success "All tests passed successfully! 🎉"
+    print_header "END OF TEST SUITE"
+    exit 0
 else
     print_error "$FAILED_TESTS test(s) failed. Please review the results above."
+    print_header "END OF TEST SUITE"
+    exit 1
 fi
-
-print_header "END OF TEST SUITE"
