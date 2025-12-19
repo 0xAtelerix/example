@@ -23,6 +23,12 @@ services:
       - --tx-dir=/consensus_data/fetcher/snapshots/42
       - --rpc-port=:8080
       - --multichain-config=/config/chain_data.json
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
   pelacli:
     container_name: pelacli
@@ -43,6 +49,12 @@ services:
       - --chains-json=/consensus_chains.json
       - --ext-txn-config-json=/ext_networks.json
       - --api-port=8081
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
   explorer:
     image: pelagosnetwork/explorer:latest

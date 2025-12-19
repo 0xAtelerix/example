@@ -60,3 +60,44 @@ lints:
 
 lints-fix:
 	$$(go env GOPATH)/bin/golangci-lint run ./... -v --timeout 10m --fix
+
+# CI targets (uses docker-compose.ci.yml as override)
+COMPOSE_CI := docker compose -f docker-compose.yml -f docker-compose.ci.yml
+
+ci-up:
+	@echo "🔼 Starting CI containers with latest pelacli..."
+	$(COMPOSE_CI) pull pelacli
+	$(COMPOSE_CI) up -d --build
+
+ci-down:
+	$(COMPOSE_CI) down
+
+ci-clean:
+	docker run --rm -v $(PWD):/data alpine rm -rf /data/appchain /data/multichain /data/test_consensus_app /data/test_consensus /data/app_data /data/pelacli_data
+
+ci-logs:
+	$(COMPOSE_CI) logs
+
+ci-wait-healthy:
+	@echo "⏳ Waiting for services to be healthy..."
+	@for i in $$(seq 1 60); do \
+		if curl -sf http://localhost:8080/health > /dev/null 2>&1; then \
+			echo "✅ Appchain is healthy"; \
+			exit 0; \
+		fi; \
+		echo "Waiting for appchain... ($$i/60)"; \
+		sleep 2; \
+	done; \
+	echo "❌ Timeout waiting for appchain"; \
+	$(COMPOSE_CI) logs; \
+	exit 1
+
+ci-test-blocks:
+	@echo "🧪 Testing block production..."
+	./test_txns.sh
+
+ci-integration: ci-clean ci-up ci-wait-healthy ci-test-blocks
+	@echo "✅ CI integration test passed!"
+
+ci-integration-cleanup: ci-integration
+	$(MAKE) ci-down ci-clean
