@@ -87,14 +87,7 @@ func Run(ctx context.Context, cfg *gosdk.InitConfig) error {
 		return fmt.Errorf("init genesis state: %w", err)
 	}
 
-	// Run appchain in background
-	go func() {
-		if err := app.Run(ctx); err != nil {
-			log.Ctx(ctx).Error().Err(err).Msg("Appchain error")
-		}
-	}()
-
-	// Setup and start JSON-RPC server
+	// Setup JSON-RPC server
 	rpcServer := rpc.NewStandardRPCServer(nil)
 	rpcServer.AddMiddleware(api.NewExampleMiddleware(log.Logger))
 
@@ -106,5 +99,26 @@ func Run(ctx context.Context, cfg *gosdk.InitConfig) error {
 
 	api.NewCustomRPC(rpcServer, appInit.Storage.AppchainDB()).AddRPCMethods()
 
-	return rpcServer.StartHTTPServer(ctx, appInit.Config.RPCPort)
+	// Error channel for goroutines
+	errCh := make(chan error, 2)
+
+	// Run appchain in background
+	go func() {
+		errCh <- app.Run(ctx)
+	}()
+
+	// Run RPC server in background
+	go func() {
+		errCh <- rpcServer.StartHTTPServer(ctx, appInit.Config.RPCPort)
+	}()
+
+	// Wait for shutdown signal or error
+	select {
+	case <-ctx.Done():
+		log.Ctx(ctx).Info().Msg("Shutdown signal received")
+
+		return nil
+	case err := <-errCh:
+		return err
+	}
 }
