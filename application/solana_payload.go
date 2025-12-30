@@ -4,9 +4,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/0xAtelerix/sdk/gosdk/external"
+	"github.com/0xAtelerix/sdk/gosdk/library"
 	"github.com/blocto/solana-go-sdk/common"
 	"github.com/blocto/solana-go-sdk/types"
 )
@@ -128,7 +128,7 @@ func createSolanaMintPayload(amount uint64) (apptypes.ExternalTransaction, error
 	// Build account list: appchainProg first, then specifics (mint, ata, authority, token)
 	// Total: 5 accounts will be passed to appchain after CPI
 	// In appchain: [0]=program, [1]=mint, [2]=ata, [3]=authority, [4]=token
-	exTx, err := external.NewExTxBuilder(appchainData, gosdk.SolanaDevnetChainID).
+	exTx, err := external.NewExTxBuilder(appchainData, library.SolanaDevnetChainID).
 		AddSolanaAccounts([]types.AccountMeta{appchainProg, mintAcc, ataAcc, authorityAcc, tokenProg}).
 		Build()
 	if err != nil {

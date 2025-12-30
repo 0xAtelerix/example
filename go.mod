@@ -3,7 +3,7 @@ module github.com/0xAtelerix/example
 go 1.25.0
 
 require (
-	github.com/0xAtelerix/sdk v0.1.7-0.20251230143106-dbcf0b7b00a5
+	github.com/0xAtelerix/sdk v0.1.7-0.20251230161310-edae7d68bfeb
 	github.com/blocto/solana-go-sdk v1.30.0
 	github.com/ethereum/go-ethereum v1.16.3
 	github.com/holiman/uint256 v1.3.2

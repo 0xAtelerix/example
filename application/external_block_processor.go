@@ -9,6 +9,7 @@ import (
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/0xAtelerix/sdk/gosdk/evmtypes"
 	"github.com/0xAtelerix/sdk/gosdk/external"
+	"github.com/0xAtelerix/sdk/gosdk/library"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -76,9 +77,9 @@ func (p *ExtBlockProcessor) ProcessBlock(
 	tx kv.RwTx,
 ) ([]apptypes.ExternalTransaction, error) {
 	switch {
-	case gosdk.IsEvmChain(apptypes.ChainType(b.ChainID)):
+	case library.IsEvmChain(apptypes.ChainType(b.ChainID)):
 		return p.processEVMBlock(b, tx)
-	case gosdk.IsSolanaChain(apptypes.ChainType(b.ChainID)):
+	case library.IsSolanaChain(apptypes.ChainType(b.ChainID)):
 		return p.processSolanaBlock(b, tx)
 	default:
 		log.Warn().Uint64("chainID", b.ChainID).Msg("Unsupported external chain, skipping...")
@@ -226,7 +227,7 @@ func (*ExtBlockProcessor) processReceipt(
 				// Create an external transaction record for the destination chain (EVM)
 				extTx, err := external.NewExTxBuilder(
 					createTokenMintPayload(userAddr, amountOut, tokenOut),
-					gosdk.EthereumSepoliaChainID).
+					library.EthereumSepoliaChainID).
 					Build()
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to create external transaction for swap event")
@@ -243,7 +244,7 @@ func (*ExtBlockProcessor) processReceipt(
 					Str("tokenOut", tokenOut).
 					Str("amountIn", amountIn.String()).
 					Str("amountOut", amountOut.String()).
-					Uint64("target_chainID", uint64(gosdk.EthereumSepoliaChainID)).
+					Uint64("target_chainID", uint64(library.EthereumSepoliaChainID)).
 					Msg("Processed swap event - EVM to EVM")
 
 			case WithdrawToSolanaSignature:
@@ -268,7 +269,7 @@ func (*ExtBlockProcessor) processReceipt(
 				log.Info().
 					Uint64("source_chainID", chainID).
 					Str("amount", amount.String()).
-					Uint64("target_chainID", uint64(gosdk.SolanaDevnetChainID)).
+					Uint64("target_chainID", uint64(library.SolanaDevnetChainID)).
 					Msg("Processed withdraw to Solana event - EVM to Solana withdraw")
 
 			default:
