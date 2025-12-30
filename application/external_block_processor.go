@@ -64,7 +64,7 @@ type ExtBlockProcessor struct {
 	msa gosdk.MultichainStateAccessor
 }
 
-func NewExtBlockProcessor(msa gosdk.MultichainStateAccessor) *ExtBlockProcessor {
+func NewExtBlockProcessor(msa gosdk.MultichainStateAccessor) gosdk.ExternalBlockProcessor {
 	return &ExtBlockProcessor{
 		msa: msa,
 	}

@@ -4,15 +4,13 @@ services:
     image: pelagosnetwork/pelacli:latest
     working_dir: /app
     volumes:
-      - ./data:/app/data
-      # Uncomment to use custom config:
-      # - ./pelacli.yaml:/app/pelacli.yaml
+      - ./data:/data
+      # - ./pelacli.yaml:/config/pelacli.yaml
     ports:
-      - "8081:8081" #Default API-port, Use config to change
+      - "8081:8081"
     command:
       - consensus
-      # Uncomment to use custom config:
-      # - --config=/app/pelacli.yaml
+      # - --config=/config/pelacli.yaml
 
   appchain:
     build:
@@ -22,17 +20,15 @@ services:
     pid: "service:pelacli"
     image: appchain:latest
     volumes:
-      - ./data:/app/data
-      # Uncomment to use custom config:
-      # - ./config.yaml:/app/config.yaml
+      - ./data:/data
+      # - ./config.yaml:/config/config.yaml
     ports:
       - "9090:9090"
       - "8080:8080"
     depends_on:
       - pelacli
-    # Uncomment to use custom config:
     # command:
-    #   - -config=/app/config.yaml
+    #   - -config=/config/config.yaml
 
   explorer:
     image: pelagosnetwork/explorer:latest

@@ -3,7 +3,7 @@ module github.com/0xAtelerix/example
 go 1.25.0
 
 require (
-	github.com/0xAtelerix/sdk v0.1.7-0.20251214090843-ebdecda41cdc
+	github.com/0xAtelerix/sdk v0.1.7-0.20251230143106-dbcf0b7b00a5
 	github.com/blocto/solana-go-sdk v1.30.0
 	github.com/ethereum/go-ethereum v1.16.3
 	github.com/holiman/uint256 v1.3.2
@@ -11,7 +11,6 @@ require (
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -64,6 +63,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250908214217-97024824d090 // indirect
 	google.golang.org/grpc v1.75.1 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 replace google.golang.org/genproto v0.0.0-20200825200019-8632dd797987 => google.golang.org/genproto v0.0.0-20250707201910-8d1bb00bc6a7

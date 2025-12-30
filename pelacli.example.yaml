@@ -7,10 +7,37 @@
 # Run with: pelacli consensus --config=pelacli.yaml
 # =============================================================================
 
-# Root data directory for all pelacli data (events, fetcher, multichain)
-# Must match appchain's data_dir for communication
-# Default: ./data
-data_dir: "./data"
+# =============================================================================
+# DATA DIR
+# =============================================================================
+# Root data directory shared with appchain
+# Both appchain and pelacli must use the same data_dir for communication
+# Default: /data (container path, works with docker-compose default mounts)
+data_dir: "/data"
+
+# =============================================================================
+# CUSTOM PATHS (OPTIONAL)
+# =============================================================================
+# Override specific directory paths. If not set, paths are derived from data_dir.
+# Useful for advanced deployments requiring non-standard directory layouts.
+#
+# custom_paths:
+#   # Fetcher database directory
+#   # Default: {data_dir}/consensus/fetcher-db
+#   fetcher_db_dir: "/custom/path/to/fetcher-db"
+#
+#   # Consensus events directory
+#   # Default: {data_dir}/consensus/events
+#   events_dir: "/custom/path/to/events"
+#
+#   # Transaction batch directory
+#   # Default: {data_dir}/consensus/txbatch
+#   txbatch_dir: "/custom/path/to/txbatch"
+#
+#   # Multichain root directory
+#   # Individual chain paths: {multichain_dir}/{chainID}
+#   # Default: {data_dir}/multichain
+#   multichain_dir: "/custom/path/to/multichain"
 
 # =============================================================================
 # CONSENSUS SETTINGS
@@ -50,11 +77,11 @@ avail_da:
 # APPCHAIN CONNECTIONS
 # =============================================================================
 # Configure which appchains pelacli should connect to for fetching transactions.
-# If not specified, defaults to chain_id=42 at :9090 (SDK's DefaultAppchainID)
+# If not specified, defaults to chain_id=42 at appchain:9090 (Docker service name)
 #
 # appchains:
 #   - chain_id: 42
-#     address: ":9090"    # gRPC address of appchain's emitter
+#     address: "appchain:9090"  # Docker service name for inter-container communication
 
 # =============================================================================
 # READ CHAINS - WSS connections for reading external chain blocks (oracle)

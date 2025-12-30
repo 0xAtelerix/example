@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -45,8 +44,8 @@ func TestEndToEnd(t *testing.T) {
 	chainID := uint64(1001)
 
 	// Create required directories and databases
-	// SDK's Init() expects these paths to exist
-	txBatchPath := gosdk.TxBatchPath(dataDir, chainID)
+	// SDK's InitApp() expects these paths to exist
+	txBatchPath := gosdk.TxBatchPathForChain(dataDir, chainID)
 	eventsPath := gosdk.EventsPath(dataDir)
 
 	require.NoError(t, os.MkdirAll(txBatchPath, 0o755))
@@ -56,18 +55,13 @@ func TestEndToEnd(t *testing.T) {
 	err := createEmptyMDBXDatabase(txBatchPath, gosdk.TxBucketsTables())
 	require.NoError(t, err, "create empty txBatch database")
 
-	// Create events file (normally created by pelacli)
-	eventsFile := filepath.Join(eventsPath, "epoch_1.data")
-	f, err := os.Create(eventsFile)
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-
 	// Create config with test values
-	cfg := &Config{
-		ChainID:     chainID,
-		DataDir:     dataDir,
-		EmitterPort: ":0", // Let OS choose
-		RPCPort:     fmt.Sprintf(":%d", port),
+	cfg := &gosdk.InitConfig{
+		ChainID:        &chainID,
+		DataDir:        dataDir,
+		EmitterPort:    ":0", // Let OS choose
+		RPCPort:        fmt.Sprintf(":%d", port),
+		RequiredChains: []uint64{},
 	}
 
 	// Create cancellable context for the test

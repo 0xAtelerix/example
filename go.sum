@@ -1,7 +1,11 @@
 filippo.io/edwards25519 v1.1.0 h1:FNf4tywRC1HmFuKW5xopWpigGjJKiJSV0Cqo0cJWDaA=
 filippo.io/edwards25519 v1.1.0/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
-github.com/0xAtelerix/sdk v0.1.7-0.20251214090843-ebdecda41cdc h1:zQZiAZGuqOEGr4IUEMz3jSF7DL6i58vBiGQnuX4HUMM=
-github.com/0xAtelerix/sdk v0.1.7-0.20251214090843-ebdecda41cdc/go.mod h1:tYa+zDjpx3DrDnTrqU2gASr8BmEoDzz6XrPuPkNcx64=
+github.com/0xAtelerix/sdk v0.1.7-0.20251230125616-2c39bfdb98c5 h1:XIxpZCn9Fy38uY9pBUw2nSX/KYr+qrodgPR588/2wSw=
+github.com/0xAtelerix/sdk v0.1.7-0.20251230125616-2c39bfdb98c5/go.mod h1:tYa+zDjpx3DrDnTrqU2gASr8BmEoDzz6XrPuPkNcx64=
+github.com/0xAtelerix/sdk v0.1.7-0.20251230142116-3b1098726a96 h1:nNSDyH0Ft1aWoGvq6QgMDUVcbg77Uu531adufnrDJs0=
+github.com/0xAtelerix/sdk v0.1.7-0.20251230142116-3b1098726a96/go.mod h1:tYa+zDjpx3DrDnTrqU2gASr8BmEoDzz6XrPuPkNcx64=
+github.com/0xAtelerix/sdk v0.1.7-0.20251230143106-dbcf0b7b00a5 h1:rCoE/cyR2fUzX7/ErYnXPcM0pTqREbzRBeSemQ2ucyI=
+github.com/0xAtelerix/sdk v0.1.7-0.20251230143106-dbcf0b7b00a5/go.mod h1:tYa+zDjpx3DrDnTrqU2gASr8BmEoDzz6XrPuPkNcx64=
 github.com/StackExchange/wmi v1.2.1 h1:VIkavFPXSjcnS+O8yTq7NI32k0R5Aj+v39y29VYDOSA=
 github.com/StackExchange/wmi v1.2.1/go.mod h1:rcmrprowKIVzvc+NUiLncP2uuArMWLCbu9SBzvHz7e8=
 github.com/VictoriaMetrics/fastcache v1.12.2 h1:N0y9ASrJ0F6h0QaC3o6uJb3NIZ9VKLjCM7NQbSmF7WI=
