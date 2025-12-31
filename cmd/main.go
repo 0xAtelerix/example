@@ -119,6 +119,8 @@ func Run(ctx context.Context, cfg *gosdk.InitConfig) error {
 
 		return nil
 	case err := <-errCh:
+		log.Ctx(ctx).Error().Err(err).Msg("Appchain error")
+
 		return err
 	}
 }

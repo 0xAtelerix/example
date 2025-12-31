@@ -70,7 +70,9 @@ func TestEndToEnd(t *testing.T) {
 
 	// Run appchain in background
 	go func() {
-		_ = Run(ctx, cfg)
+		if runErr := Run(ctx, cfg); runErr != nil {
+			t.Logf("Run error: %v", runErr)
+		}
 	}()
 
 	// Wait until HTTP service is up
