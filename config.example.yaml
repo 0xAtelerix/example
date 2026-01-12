@@ -1,0 +1,50 @@
+# Appchain Configuration
+# Copy this file to config.yaml and modify as needed.
+# All fields are optional - defaults will be used if not specified.
+# Run with: ./appchain --config=config.yaml
+
+# Unique identifier for this appchain
+# Must match the chain_id in pelacli's appchains config
+# Default: 42
+chain_id: 42
+
+# Root data directory shared with pelacli
+# Both appchain and pelacli must use the same data_dir for communication
+# Default: /data (container path, works with docker-compose default mounts)
+data_dir: "/data"
+
+# gRPC port for emitter API (pelacli fetcher connects here)
+# Default: :9090
+emitter_port: ":9090"
+
+# HTTP port for JSON-RPC server (clients connect here)
+# Default: :8080
+rpc_port: ":8080"
+
+# Log level: -1=trace, 0=debug, 1=info, 2=warn, 3=error
+# Default: 1 (info)
+log_level: 1
+
+# Required external chains that this appchain reads from
+# Appchain will wait for these chains' data at startup
+# Common chain IDs: 11155111 (Eth Sepolia), 80002 (Polygon Amoy), 97 (BSC testnet)
+required_chains:
+  - 80002  # Polygon Amoy testnet
+  - 11155111  # Ethereum Sepolia testnet
+
+# Prometheus metrics port (optional)
+# Default: "" (disabled)
+# prometheus_port: ":2112"
+
+# Validator ID for consensus (optional)
+# Default: "" (uses default validator)
+# validator_id: "validator-1"
+
+# Custom paths (advanced use only - overrides standard data_dir structure)
+# NOTE: Appchain and pelacli must use compatible paths for communication
+# custom_paths:
+#   multichain_dir: "/custom/path/to/multichain"
+#   appchain_db_dir: "/custom/path/to/appchain/db"
+#   txpool_dir: "/custom/path/to/txpool"
+#   events_stream_dir: "/custom/path/to/events"
+#   txbatch_dir: "/custom/path/to/txbatch"

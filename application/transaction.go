@@ -6,9 +6,9 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
 	"github.com/0xAtelerix/sdk/gosdk/external"
+	"github.com/0xAtelerix/sdk/gosdk/library"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
@@ -173,7 +173,7 @@ func (e *Transaction[R]) createExternalTransaction() (apptypes.ExternalTransacti
 	payload := createTokenMintPayload(recipientAddr, amount, e.Token)
 
 	// Create external transaction targeting Sepolia
-	extTx, err := external.NewExTxBuilder(payload, gosdk.EthereumSepoliaChainID).Build()
+	extTx, err := external.NewExTxBuilder(payload, library.EthereumSepoliaChainID).Build()
 	if err != nil {
 		return apptypes.ExternalTransaction{}, err
 	}

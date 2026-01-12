@@ -1,14 +1,16 @@
 VERSION=v2.4.0
 
+# Run appchain with default config (zero-config)
 run:
-	go run cmd/main.go \
-                                        -emitter-port=:50051 \
-                                        -db-path=/tmp/example/db/ \
-                                        -tx-dir=/tmp/consensus/fetcher/snapshots/42 \
-                                        -local-db-path=/tmp/example/test_tmp \
-                                        -stream-dir=/tmp/consensus/events/ \
-                                        -multichain-config=./debug/multichain.json \
-                                        -rpc-port=:8080
+	go run ./cmd/...
+
+# Run appchain with custom config file
+run-config:
+	go run ./cmd/... -config=config.yaml
+
+# Build appchain binary
+build-bin:
+	go build -o bin/appchain ./cmd/...
 
 dockerbuild:
 	DOCKER_BUILDKIT=1 docker build --ssh default -t appchain:latest .
