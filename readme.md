@@ -9,10 +9,8 @@
 - [Key concepts & execution model](#key-concepts--execution-model)
 - [Project layout](#project-layout)
 - [Docker — compose stack](#docker--compose-stack)
-- [Configuration files](#configuration-files)
-  - [consensus_chains.json](#configconsensus_chainsjson-used-by-pelacli-for-reading-from-external-chains)
-  - [chain_data.json](#configchain_datajson-used-by-appchain-for-reading-external-chain-data)
-  - [ext_networks.json](#configext_networksjson-used-by-pelacli-for-writing-to-external-chains)
+- [Zero-Config Setup](#zero-config-setup)
+- [Custom Configuration (Optional)](#custom-configuration-optional)
 - [Build & Run](#build--run)
 - [JSON-RPC quickstart](#json-rpc-quickstart)
 - [Code walkthrough (where to extend)](#code-walkthrough-where-to-extend)
@@ -29,14 +27,14 @@
 * **Buckets** (tables) for app state (`appaccounts`), receipts, blocks, checkpoints, etc.
 * A runnable `main.go` that wires the SDK, DBs, tx-pool, validator set, the appchain loop, and default **JSON-RPC**.
 * One **custom JSON-RPC** (`getBalance`) + **standard** ones (`sendTransaction`, `getTransactionStatus`, `getTransactionReceipt`, …).
-* A **docker-compose** that runs the node together with `pelacli` so your txs actually progress. 
+* A **docker-compose** that runs the node together with `pelacli` so your txs actually progress.
 
 ## Key concepts & execution model
 
 1. **Clients** submit transactions via JSON-RPC (`sendTransaction`) into the **tx pool**.
 2. The **consensus** (`pelacli`) periodically:
 
-    * pulls txs via the appchain’s **gRPC emitter API** (`CreateInternalTransactionsBatch`),
+    * pulls txs via the appchain's **gRPC emitter API** (`CreateInternalTransactionsBatch`),
     * writes **tx-batches** to an MDBX database (`txbatch`),
     * appends **events** (referencing those batches + external blocks) to the event stream file.
 3. The appchain run loop consumes **events + tx-batches**, executes your `Transaction.Process` inside a DB write transaction, persists **receipts**, builds a **block**, and writes a **checkpoint**.
@@ -44,8 +42,8 @@
 
 > Status lifecycle: **Pending** (in tx pool) → **Batched** (pulled by pelacli) → **Processed/Failed** (after your txn processing logic runs in a block).
 
-* **Transactions don’t auto-finalize.**
-  Without the **consensus** you’ll only ever see `Pending`. This compose includes `pelacli` to move them forward.
+* **Transactions don't auto-finalize.**
+  Without the **consensus** you'll only ever see `Pending`. This compose includes `pelacli` to move them forward.
 
 * **The appchain waits for real data sources.**
   It blocks until both exist:
@@ -54,11 +52,11 @@
   * the **tx-batch MDBX**: `<tx-dir>` with the `txbatch` table.
     `pelacli` creates and updates both.
 
-* **Multichain access uses local MDBX**
-  The SDK reads external chain state from **MDBX databases** on disk. `pelacli` populates and updates them using your RPC **API key**.
+* **Multichain access uses local SQLite**
+  The SDK reads external chain state from **SQLite databases** on disk. `pelacli` populates and updates them automatically. By default, Sepolia and Polygon Amoy are enabled. Add additional networks via `read_chains` in `pelacli.yaml` (see [`pelacli.example.yaml`](./pelacli.example.yaml)).
 
 * **Cross-chain transaction flow**
-  - **Read**: `pelacli` fetches data from external chains → stores in MDBX → appchain reads via `MultichainStateAccess`
+  - **Read**: `pelacli` fetches data from external chains → stores in SQLite → appchain reads via `MultichainStateAccess`
   - **Write**: appchain generates `ExternalTransaction` → `pelacli` sends to Pelagos contract → Pelagos routes to specific AppChain contract based on appchainID
   - **Custom contracts**: Deploy your own AppChain contracts on external chains using the contracts in the [SDK contracts folder](https://github.com/0xAtelerix/sdk/tree/main/contracts) for more advanced cross-chain interactions
 
@@ -79,175 +77,190 @@
 │     ├─ api.go               # Custom JSON-RPC methods (getBalance)
 │     └─ middleware.go        # CORS and other middleware
 ├─ cmd/
-│  └─ main.go                 # Wiring & run loop (the app binary)
-├─ config/
-│  ├─ chain_data.json         # Chain ID → MDBX path mapping (appchain reads)
-│  ├─ consensus_chains.json   # External chains to fetch data from (pelacli writes)
-│  └─ ext_networks.json       # External chains to send txns to (pelacli sends txns)
+│  ├─ config.go               # Config struct and YAML loading
+│  ├─ main.go                 # Wiring & run loop (the app binary)
+│  └─ main_test.go            # End-to-end integration test
+├─ data/                      # Shared volume (created at runtime)
+├─ config.example.yaml        # Example appchain config
+├─ pelacli.example.yaml       # Example pelacli config
 ├─ Dockerfile                 # Dockerfile for the appchain node
 ├─ docker-compose.yml         # Compose for appchain + pelacli
-└─ test_txns.sh               # Test script for sending transactions and checking things are working
+└─ test_txns.sh               # Test script for sending transactions
 ```
 
 
 ## Docker — compose stack
 
-This compose runs **both** your appchain and the **pelacli** streamer.
+This compose runs **both** your appchain and the **pelacli** streamer with **zero configuration required**.
 
 ### `docker-compose.yml`
 
 ```yaml
 services:
+  pelacli:
+    container_name: pelacli
+    image: pelagosnetwork/pelacli:latest
+    working_dir: /app
+    volumes:
+      - ./data:/app/data
+    command:
+      - consensus
+    # Zero-config: uses SDK defaults
+    # - appchain: 42 @ :9090
+    # - chains: Sepolia, Polygon Amoy
+    # - paths: ./data/events, ./data/multichain
+
   appchain:
     build:
       context: .
       dockerfile: Dockerfile
+    working_dir: /app
     pid: "service:pelacli"
     image: appchain:latest
     volumes:
-      - ./pelacli_data:/consensus_data
-      - ./app_data:/data
-      - ./config/chain_data.json:/data/chain_data.json:ro
-      - ./multichain:/multichain
+      - ./data:/app/data
     ports:
       - "9090:9090"
       - "8080:8080"
     depends_on:
       - pelacli
-    command:
-      - --emitter-port=:9090
-      - --db-path=/data/appchain-db
-      - --local-db-path=/data/local-db
-      - --stream-dir=/consensus_data/events
-      - --tx-dir=/consensus_data/fetcher/snapshots/42
-      - --rpc-port=:8080
-      - --multichain-config=/data/chain_data.json
-
-  pelacli:
-    container_name: pelacli
-    image: pelagosnetwork/pelacli:latest
-    volumes:
-      - ./pelacli_data:/consensus_data
-      - ./config/consensus_chains.json:/consensus_chains.json:ro
-      - ./config/ext_networks.json:/ext_networks.json:ro
-      - ./multichain:/multichain
-    command:
-      - consensus
-      - --snapshot-dir=/consensus_data
-      - --appchain=42=appchain:9090
-      - --ask-period=1s
-      - --multichain-dir=/consensus_data/multichain_db
-      - --chains-json=/consensus_chains.json
-      - --ext-txn-config-json=/ext_networks.json
+    # Zero-config: uses SDK defaults
+    # - chain_id: 42
+    # - emitter: :9090
+    # - rpc: :8080
+    # - data: ./data
 ```
 
-**What the paths mean**
+**Data directory structure**
 
-* Appchain:
+Both containers share the same `./data` volume:
 
-    * `--stream-dir=/consensus_data/events` → pelacli writes `epoch_1.data` here.
-    * `--tx-dir=/consensus_data/fetcher/snapshots/42` → pelacli writes the read-only MDBX with `txbatch` table here.
-    * `--multichain-config=/data/chain_data.json` → maps chain IDs to MDBX DBs for external access.
-
-* pelacli:
-
-    * `--chains-json=/consensus_chains.json` → tells pelacli which L1/L2s to fetch (Sepolia in the example).
-    * `--ext-txn-config-json=/ext_networks.json` → configures external chains that pelacli can send transactions to.
-    * `--appchain=42=appchain:9090` → your **ChainID** is `42` and the appchain gRPC emitter is at `appchain:9090`.
-    * `--snapshot-dir` and `--multichain-dir` live under `/consensus_data` (shared with appchain as `./pelacli_data`).
-
-> Keep **ChainID=42** consistent across your code (`const ChainID = 42`), pelacli mapping, and the `--tx-dir` path that includes `/snapshots/42`.
-
-
-## Configuration files
-
-### `config/consensus_chains.json` (used by **pelacli** for **reading** from external chains)
-
-> **Put your API key** (Alchemy/Infura/etc.) so pelacli can fetch external chain data and materialize it in MDBX.
-
-```json
-[
-  {
-    "ChainID": 11155111,
-    "DBPath": "/multichain/sepolia",
-    "APIKey": "YOUR_API_KEY_HERE",
-    "StartBlock": 9214937
-  }
-]
+```
+./data/
+├── multichain/           # External chain data (written by pelacli, read by appchain)
+│   ├── 11155111/         # Ethereum Sepolia
+│   │   └── sqlite
+│   └── 80002/            # Polygon Amoy
+│       └── sqlite
+├── events/               # Consensus events (written by pelacli, read by appchain)
+│   └── epoch_1.data
+├── fetcher/              # Transaction batches (written by pelacli, read by appchain)
+│   └── 42/               # Per-appchain (chainID=42)
+│       └── mdbx.dat
+├── appchain/             # Appchain state (written by appchain)
+│   └── 42/
+│       └── mdbx.dat
+└── local/                # Local node data like txpool (written by appchain)
+    └── 42/
+        └── mdbx.dat
 ```
 
-* `DBPath` must live under the mounted `/multichain` volume (shared with appchain).
-* `StartBlock` controls the initial sync point.
+* **pelacli** writes: `events/`, `fetcher/`, `multichain/`
+* **appchain** writes: `appchain/`, `local/`
+* **appchain** reads: `events/`, `fetcher/`, `multichain/`
 
-### `config/chain_data.json` (used by **appchain** for **reading** external chain data)
+> Keep **ChainID=42** consistent across your code and pelacli config (both default to 42).
 
-> Maps **chain IDs** to **MDBX paths** (the same ones pelacli maintains). Your appchain uses this to access external blockchain state.
 
-```json
-{
-  "11155111": "/multichain/sepolia"
-}
+## Zero-Config Setup
+
+The default setup requires **no configuration files**. Pelacli comes with built-in testnet defaults:
+
+| Network | Chain ID | Pelagos Contract |
+|---------|----------|------------------|
+| Sepolia | 11155111 | `0x922e02fFbDe8ABbF3058ccC3f9433018A2ff8C1d` |
+| Polygon Amoy | 80002 | `0x98D34a83c45FEae289f6FA72ba009Ad49F3D26ED` |
+
+Just clone and run:
+
+```bash
+git clone https://github.com/0xAtelerix/example
+cd example
+docker compose up -d
 ```
 
-### `config/ext_networks.json` (used by **pelacli** for **writing** to external chains)
 
-> Configures external chains that pelacli can send transactions to. Your appchain generates `ExternalTransaction` items that pelacli processes and submits using these credentials.
+## Custom Configuration (Optional)
 
-```json
-[
-  {
-    "chainId": 137,
-    "rpcUrl": "https://polygon-rpc.com",
-    "contractAddress": "0x1234567890123456789012345678901234567890",
-    "privateKey": "YOUR_PRIVATE_KEY_HERE"
-  }
-]
+For production or custom setups, copy the example config files and modify as needed.
+
+### Appchain Configuration
+
+```bash
+cp config.example.yaml config.yaml
+# Edit config.yaml with your settings
+./appchain -config=config.yaml
 ```
 
-* `chainId` → The chain ID of the external chain (e.g., 137 for Polygon mainnet, 80002 for Polygon Amoy testnet).
-* `rpcUrl` → RPC endpoint for the external chain.
-* `contractAddress` → Address of the Pelagos contract on this chain that will route transactions to appchain contracts.
-* `privateKey` → Private key that pelacli will use to sign and send transactions to this chain.
+Available settings in `config.yaml`:
 
-> ⚠️ **Security Note**: Keep your private keys secure. Never commit `ext_networks.json` with real private keys to version control. The private key account must have sufficient native tokens for gas fees and appropriate permissions to interact with the Pelagos contract.
+| Field | Default | Description |
+|-------|---------|-------------|
+| `chain_id` | 42 | Appchain identifier (must match pelacli) |
+| `data_dir` | `./data` | Root data directory shared with pelacli |
+| `emitter_port` | `:9090` | gRPC port for emitter API |
+| `rpc_port` | `:8080` | HTTP port for JSON-RPC server |
+| `log_level` | 1 | Log verbosity: 0=debug, 1=info, 2=warn, 3=error |
+
+See [`config.example.yaml`](./config.example.yaml) for the complete example.
+
+### Pelacli Configuration
+
+```bash
+cp pelacli.example.yaml pelacli.yaml
+# Edit pelacli.yaml with your settings
+pelacli consensus --config=pelacli.yaml
+```
+
+Key configuration sections:
+
+| Section | Default | Description |
+|---------|---------|-------------|
+| `data_dir` | `./data` | Root data directory (must match appchain's `data_dir`) |
+| `consensus` | - | Polling interval and fetcher settings |
+| `api` | - | External transactions REST API settings |
+| `avail_da` | - | Avail DA integration (optional) |
+| `appchains` | `42@:9090` | Which appchains to connect to |
+| `read_chains` | Sepolia, Amoy | WSS endpoints for reading external blocks |
+| `write_chains` | Sepolia, Amoy | RPC endpoints for sending cross-chain transactions |
+
+**Block offset values** (for `read_chains`):
+- `-4` = safe (2 blocks behind latest)
+- `-3` = finalized (most secure, ~15 min delay on Ethereum)
+- `-2` = latest (no delay, default for testnets)
+- `1`, `2`, etc. = fixed offset from latest (e.g., `2` means if latest is block X, you get block X-2)
+
+See [`pelacli.example.yaml`](./pelacli.example.yaml) for all available options with detailed comments.
 
 
 ## Build & Run
 
-1. **Fill configs:**
-
-   * Put your API key into `config/consensus_chains.json` (required for reading external chain data).
-   * Ensure `config/chain_data.json` points to the same MDBX path(s).
-   * Configure external transaction networks in `config/ext_networks.json` (optional, only needed for writing to external chains).
-
-2. **Start:**
-   * Make sure local docker daemon is working
+1. **Start (zero-config):**
 
    ```bash
    docker compose up -d
    ```
 
-3. **Check health:**
+2. **Check health:**
 
    ```bash
    curl -s http://localhost:8080/health | jq .
    ```
 
-4. **Tail logs:**
+3. **Tail logs:**
 
    ```bash
    docker compose logs -f pelacli
    docker compose logs -f appchain
    ```
 
-5. **Test:**
-   * If you are running the skeleton app without changes, you can use the provided script to send test transactions.
-   
+4. **Test:**
+
    ```bash
    ./test_txns.sh
    ```
 
-> On the first run, pelacli will populate MDBX and start producing events/tx-batches. Your appchain waits until the event file and tx-batch DB exist, then begins processing.
+> On the first run, pelacli will populate SQLite databases and start producing events/tx-batches. Your appchain waits until the event file and tx-batch DB exist, then begins processing.
 
 ---
 
@@ -319,15 +332,16 @@ curl -s http://localhost:8080/rpc \
 
 ## Flags (quick reference)
 
-These are wired in `main.go` and already set in `docker-compose.yml`:
+The appchain uses SDK defaults. Override with config file:
 
-* `--emitter-port=:9090` — gRPC emitter (pelacli pulls txs here)
-* `--db-path=/data/appchain-db` — appchain MDBX
-* `--local-db-path=/data/local-db` — tx pool MDBX
-* `--stream-dir=/consensus_data/events` — event file directory (pelacli writes)
-* `--tx-dir=/consensus_data/fetcher/snapshots/42` — **read-only** tx-batch MDBX (pelacli writes)
-* `--rpc-port=:8080` — JSON-RPC server
-* `--multichain-config=/data/chain_data.json` — external chain MDBX mapping
+* `-config=config.yaml` — Path to YAML config file (optional)
+
+All settings can be configured in the YAML file:
+* `chain_id` — Appchain identifier (default: 42)
+* `data_dir` — Root data directory (default: `./data`)
+* `emitter_port` — gRPC emitter port (default: `:9090`)
+* `rpc_port` — JSON-RPC server port (default: `:8080`)
+* `log_level` — Log verbosity 0-3 (default: 1=info)
 
 ## Additional Resources
 
@@ -335,4 +349,4 @@ These are wired in `main.go` and already set in `docker-compose.yml`:
 - [SDK Contracts](https://github.com/0xAtelerix/sdk/tree/main/contracts) — Deploy your own AppChain contracts on external chains for custom cross-chain functionality
 
 ---
-**Happy building! 🚀** For questions or issues, check the [issues](https://github.com/0xAtelerix/example/issues) or reach out to the Pelagos community.
+**Happy building!** For questions or issues, check the [issues](https://github.com/0xAtelerix/example/issues) or reach out to the Pelagos community.

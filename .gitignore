@@ -2,8 +2,6 @@
 .vscode
 appchain
 main
-app_data/
-pelacli_data/
-test_consensus/
-test_consensus_app/
-multichain/
+data/
+config.yaml
+pelacli.yaml

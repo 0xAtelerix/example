@@ -1,60 +1,34 @@
 services:
+  pelacli:
+    container_name: pelacli
+    image: pelagosnetwork/pelacli:latest
+    working_dir: /app
+    volumes:
+      - ./data:/data
+      # - ./pelacli.yaml:/config/pelacli.yaml
+    ports:
+      - "8081:8081"
+    command:
+      - consensus
+      # - --config=/config/pelacli.yaml
+
   appchain:
     build:
       context: .
       dockerfile: Dockerfile
+    working_dir: /app
     pid: "service:pelacli"
     image: appchain:latest
     volumes:
-      - ./pelacli_data:/consensus_data
-      - ./app_data:/data
-      - ./config/chain_data.json:/config/chain_data.json:ro
-      - ./multichain:/multichain
+      - ./data:/data
+      # - ./config.yaml:/config/config.yaml
     ports:
       - "9090:9090"
       - "8080:8080"
     depends_on:
       - pelacli
-    command:
-      - --emitter-port=:9090
-      - --db-path=/data/appchain-db
-      - --local-db-path=/data/local-db
-      - --stream-dir=/consensus_data/events
-      - --tx-dir=/consensus_data/fetcher/snapshots/42
-      - --rpc-port=:8080
-      - --multichain-config=/config/chain_data.json
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 10s
-
-  pelacli:
-    container_name: pelacli
-    image: pelagosnetwork/pelacli:latest
-    volumes:
-      - ./pelacli_data:/consensus_data
-      - ./config/consensus_chains.json:/consensus_chains.json:ro
-      - ./config/ext_networks.json:/ext_networks.json:ro
-      - ./multichain:/multichain
-    ports:
-      - "8081:8081"
-    command:
-      - consensus
-      - --snapshot-dir=/consensus_data
-      - --appchain=42=appchain:9090
-      - --ask-period=1s
-      - --multichain-dir=/consensus_data/multichain_db
-      - --chains-json=/consensus_chains.json
-      - --ext-txn-config-json=/ext_networks.json
-      - --api-port=8081
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 10s
+    # command:
+    #   - -config=/config/config.yaml
 
   explorer:
     image: pelagosnetwork/explorer:latest
@@ -66,4 +40,3 @@ services:
     depends_on:
       - appchain
       - pelacli
-
