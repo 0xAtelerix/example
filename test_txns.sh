@@ -536,7 +536,9 @@ main() {
     print_info "Initial external tx count: $INITIAL_EXT_COUNT"
 
     EXT_TX1=$(generate_tx_hash)
-    api_call "sendTransaction" "{\"sender\":\"alice\",\"receiver\":\"bob\",\"value\":100,\"token\":\"USDT\",\"hash\":\"$EXT_TX1\",\"generate_ext_txn\":true}" "Alice transfer with external txn generation"
+    # Use random value (100-999) to ensure unique payload on Sepolia each run
+    EXT_VALUE=$((100 + RANDOM % 900))
+    api_call "sendTransaction" "{\"sender\":\"alice\",\"receiver\":\"bob\",\"value\":$EXT_VALUE,\"token\":\"USDT\",\"hash\":\"$EXT_TX1\",\"generate_ext_txn\":true}" "Alice transfer $EXT_VALUE USDT with external txn"
 
     # Test 6: Check External Transaction Status on Appchain
     print_header "6. CHECKING EXTERNAL TRANSACTION STATUS (APPCHAIN)"
