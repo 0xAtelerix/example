@@ -10,8 +10,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# API endpoint
+# API endpoints
 API_URL="http://localhost:8080/rpc"
+PELACLI_API_URL="http://localhost:8081/rpc"
+SEPOLIA_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
 CONTENT_TYPE="Content-Type: application/json"
 
 # Counter for request IDs
@@ -333,52 +335,244 @@ check_balance() {
     echo "$balance"
 }
 
+# Function to get external transactions from pelacli and return the latest tx hash
+# Calls ext_listTransactions on pelacli RPC
+get_latest_external_txn() {
+    local min_count=$1
+
+    local attempt=0
+    local max_attempts=15
+
+    while [ $attempt -lt $max_attempts ]; do
+        attempt=$((attempt + 1))
+
+        # Build ext_listTransactions request to pelacli (filter by fromChainId=42 which is our appchain)
+        local request="{\"jsonrpc\":\"2.0\",\"method\":\"ext_listTransactions\",\"params\":[{\"fromChainId\":42,\"limit\":1}],\"id\":${REQUEST_ID}}"
+        REQUEST_ID=$((REQUEST_ID + 1))
+
+        local response=$(curl -s -X POST "$PELACLI_API_URL" -H "$CONTENT_TYPE" -d "$request")
+        local curl_exit_code=$?
+
+        if [ $curl_exit_code -ne 0 ]; then
+            if [ $attempt -lt $max_attempts ]; then
+                sleep 2
+                continue
+            fi
+            return 1
+        fi
+
+        # Check for RPC error
+        local rpc_error=$(echo "$response" | jq -r '.error.message // empty' 2>/dev/null)
+        if [ -n "$rpc_error" ]; then
+            if [ $attempt -lt $max_attempts ]; then
+                sleep 2
+                continue
+            fi
+            return 1
+        fi
+
+        # Get total count and latest tx hash
+        local total=$(echo "$response" | jq -r '.result.total // 0' 2>/dev/null)
+        if [ "$total" -ge "$min_count" ] 2>/dev/null; then
+            # Return the latest tx hash (first in the list)
+            echo "$response" | jq -r '.result.transactions[0].txHash // empty' 2>/dev/null
+            return 0
+        fi
+
+        if [ $attempt -lt $max_attempts ]; then
+            sleep 2
+        fi
+    done
+
+    return 1
+}
+
+# Function to verify external transaction on Sepolia using public RPC
+# Queries eth_getTransactionReceipt to confirm the tx was mined
+verify_tx_on_sepolia() {
+    local tx_hash=$1
+    local description=$2
+
+    print_info "Verifying transaction on Sepolia: $tx_hash"
+
+    # Record this check in the test summary arrays
+    TEST_METHODS[$TOTAL_TESTS]="eth_getTransactionReceipt"
+    TEST_DESCRIPTIONS[$TOTAL_TESTS]="$description"
+
+    local attempt=0
+    local max_attempts=30  # Up to 60 seconds for tx confirmation
+
+    while [ $attempt -lt $max_attempts ]; do
+        attempt=$((attempt + 1))
+
+        # Query Sepolia RPC for transaction receipt
+        local request="{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionReceipt\",\"params\":[\"$tx_hash\"],\"id\":${REQUEST_ID}}"
+        REQUEST_ID=$((REQUEST_ID + 1))
+
+        echo -e "${BLUE}Request to Sepolia RPC (attempt $attempt/${max_attempts}):${NC}"
+        echo "$request" | jq '.' 2>/dev/null || echo "$request"
+
+        local response=$(curl -s -X POST "$SEPOLIA_RPC_URL" -H "$CONTENT_TYPE" -d "$request")
+        local curl_exit_code=$?
+
+        echo -e "${GREEN}Response:${NC}"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+
+        # Check if curl failed
+        if [ $curl_exit_code -ne 0 ]; then
+            print_error "Request failed - Sepolia RPC not responding"
+            if [ $attempt -lt $max_attempts ]; then
+                print_info "Retrying in 2s..."
+                sleep 2
+                continue
+            fi
+            TEST_RESULTS[$TOTAL_TESTS]="FAILED"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+            TOTAL_TESTS=$((TOTAL_TESTS + 1))
+            echo ""
+            return 1
+        fi
+
+        # Check for RPC error
+        local rpc_error=$(echo "$response" | jq -r '.error.message // empty' 2>/dev/null)
+        if [ -n "$rpc_error" ]; then
+            print_error "Sepolia RPC error: $rpc_error"
+            TEST_RESULTS[$TOTAL_TESTS]="FAILED"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+            TOTAL_TESTS=$((TOTAL_TESTS + 1))
+            echo ""
+            return 1
+        fi
+
+        # Check if receipt exists (transaction was mined)
+        local receipt_status=$(echo "$response" | jq -r '.result.status // empty' 2>/dev/null)
+        local block_number=$(echo "$response" | jq -r '.result.blockNumber // empty' 2>/dev/null)
+
+        if [ -n "$receipt_status" ] && [ "$receipt_status" != "null" ]; then
+            if [ "$receipt_status" == "0x1" ]; then
+                print_success "Transaction confirmed on Sepolia!"
+                echo -e "${BLUE}Block Number: $block_number${NC}"
+                echo -e "${BLUE}Status: Success (0x1)${NC}"
+                TEST_RESULTS[$TOTAL_TESTS]="SUCCESS"
+                SUCCESSFUL_TESTS=$((SUCCESSFUL_TESTS + 1))
+                TOTAL_TESTS=$((TOTAL_TESTS + 1))
+                echo ""
+                return 0
+            else
+                print_error "Transaction failed on Sepolia (status: $receipt_status)"
+                TEST_RESULTS[$TOTAL_TESTS]="FAILED"
+                FAILED_TESTS=$((FAILED_TESTS + 1))
+                TOTAL_TESTS=$((TOTAL_TESTS + 1))
+                echo ""
+                return 1
+            fi
+        fi
+
+        # Receipt is null - transaction not yet mined
+        if [ $attempt -lt $max_attempts ]; then
+            print_info "Transaction pending, waiting for confirmation... ($attempt/$max_attempts)"
+            sleep 2
+        fi
+    done
+
+    print_error "Transaction not confirmed on Sepolia after $max_attempts attempts"
+    TEST_RESULTS[$TOTAL_TESTS]="FAILED"
+    FAILED_TESTS=$((FAILED_TESTS + 1))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    echo ""
+    return 1
+}
+
 # Main test flow
 main() {
     print_header "BLOCKCHAIN TRANSACTION API TEST SUITE"
-    
+
     # Test 1: Basic Transfers
     print_header "1. BASIC TRANSFERS"
-    
+
     TX_HASH1=$(generate_tx_hash)
     api_call "sendTransaction" "{\"sender\":\"alice\",\"receiver\":\"bob\",\"value\":1000,\"token\":\"USDT\",\"hash\":\"$TX_HASH1\"}" "Alice transfers 1000 USDT to Bob"
-    
+
     TX_HASH2=$(generate_tx_hash)
     api_call "sendTransaction" "{\"sender\":\"bob\",\"receiver\":\"charlie\",\"value\":500,\"token\":\"USDT\",\"hash\":\"$TX_HASH2\"}" "Bob transfers 500 USDT to Charlie"
-    
+
     TX_HASH3=$(generate_tx_hash)
     api_call "sendTransaction" "{\"sender\":\"alice\",\"receiver\":\"charlie\",\"value\":1,\"token\":\"BTC\",\"hash\":\"$TX_HASH3\"}" "Alice transfers 1 BTC to Charlie"
-    
+
     # Test 2: Check Transaction Status
     print_header "2. CHECKING TRANSACTION STATUS"
-    
+
     check_tx_status "$TX_HASH1"
     check_tx_status "$TX_HASH2"
     check_tx_status "$TX_HASH3"
-    
+
     # Test 3: Error Cases
     print_header "3. ERROR HANDLING TESTS"
-    
+
     ERROR_TX=$(generate_tx_hash)
     api_call "sendTransaction" "{\"sender\":\"nonexistent\",\"receiver\":\"alice\",\"value\":1000,\"token\":\"USDT\",\"hash\":\"$ERROR_TX\"}" "Transfer from non-existent account (should fail)"
-    
+
     # Check Alice's current balance and send more than that
     ALICE_CURRENT_BALANCE=$(check_balance "alice" "USDT" "Alice's current balance for insufficient funds test")
     # Send current balance + 10000 to ensure it exceeds available balance
     INSUFFICIENT_AMOUNT=$((ALICE_CURRENT_BALANCE + 10000))
-    
+
     ERROR_TX2=$(generate_tx_hash)
     api_call "sendTransaction" "{\"sender\":\"alice\",\"receiver\":\"bob\",\"value\":$INSUFFICIENT_AMOUNT,\"token\":\"USDT\",\"hash\":\"$ERROR_TX2\"}" "Transfer more than available balance (should fail)"
-    
+
     # Test 4: Check Error Transaction Status
     print_header "4. CHECKING ERROR TRANSACTION STATUS"
-    
+
     check_tx_status "$ERROR_TX"
     check_tx_status "$ERROR_TX2"
-    
+
+    # Test 5: External Transaction Generation (only 1 to save Sepolia balance)
+    print_header "5. EXTERNAL TRANSACTION TEST"
+
+    # Get current count of external transactions before sending
+    INITIAL_EXT_COUNT=$(curl -s -X POST "$PELACLI_API_URL" -H "$CONTENT_TYPE" \
+        -d '{"jsonrpc":"2.0","method":"ext_listTransactions","params":[{"fromChainId":42,"limit":1}],"id":0}' \
+        | jq -r '.result.total // 0' 2>/dev/null)
+    print_info "Initial external tx count: $INITIAL_EXT_COUNT"
+
+    EXT_TX1=$(generate_tx_hash)
+    api_call "sendTransaction" "{\"sender\":\"alice\",\"receiver\":\"bob\",\"value\":100,\"token\":\"USDT\",\"hash\":\"$EXT_TX1\",\"generate_ext_txn\":true}" "Alice transfer with external txn generation"
+
+    # Test 6: Check External Transaction Status on Appchain
+    print_header "6. CHECKING EXTERNAL TRANSACTION STATUS (APPCHAIN)"
+
+    check_tx_status "$EXT_TX1"
+
+    # Test 7: Get external tx hash from pelacli and verify on Sepolia
+    print_header "7. VERIFYING EXTERNAL TRANSACTION ON SEPOLIA"
+
+    # Wait for pelacli to process and get the Sepolia tx hash
+    EXPECTED_COUNT=$((INITIAL_EXT_COUNT + 1))
+    print_info "Waiting for external tx to appear in pelacli (expecting count >= $EXPECTED_COUNT)..."
+
+    SEPOLIA_TX_HASH=$(get_latest_external_txn $EXPECTED_COUNT)
+    if [ -z "$SEPOLIA_TX_HASH" ]; then
+        print_error "Failed to get external transaction hash from pelacli"
+        TEST_METHODS[$TOTAL_TESTS]="ext_listTransactions"
+        TEST_DESCRIPTIONS[$TOTAL_TESTS]="Get external tx hash from pelacli"
+        TEST_RESULTS[$TOTAL_TESTS]="FAILED"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    else
+        print_success "Got Sepolia tx hash: $SEPOLIA_TX_HASH"
+        TEST_METHODS[$TOTAL_TESTS]="ext_listTransactions"
+        TEST_DESCRIPTIONS[$TOTAL_TESTS]="Get external tx hash from pelacli"
+        TEST_RESULTS[$TOTAL_TESTS]="SUCCESS"
+        SUCCESSFUL_TESTS=$((SUCCESSFUL_TESTS + 1))
+        TOTAL_TESTS=$((TOTAL_TESTS + 1))
+
+        # Verify the transaction on Sepolia
+        verify_tx_on_sepolia "$SEPOLIA_TX_HASH" "Verify tx confirmed on Sepolia"
+    fi
+
     # Summary
     print_header "TEST SUITE COMPLETED"
-    print_success "Basic transfer functionality and error handling have been tested!"
+    print_success "Basic transfer, error handling, and external transaction tests completed!"
     print_info "Check the responses above for any errors or unexpected results"
 }
 
@@ -391,13 +585,24 @@ if ! command -v jq &> /dev/null; then
     print_info "Continuing without JSON formatting..."
 fi
 
-# Check if the API is running
-print_info "Checking if API is running at $API_URL..."
+# Check if the appchain API is running
+print_info "Checking if appchain API is running at $API_URL..."
 if curl -s -f -X POST "$API_URL" -H "$CONTENT_TYPE" -d '{"jsonrpc":"2.0","method":"getTransactionStatus","params":["0x0"],"id":0}' > /dev/null 2>&1; then
-    print_success "API is running!"
+    print_success "Appchain API is running!"
 else
-    print_error "API is not responding at $API_URL"
+    print_error "Appchain API is not responding at $API_URL"
     print_error "Please start the appchain server first"
+    exit 1
+fi
+
+# Check if the pelacli API is running (don't use -f since error responses are valid)
+print_info "Checking if pelacli API is running at $PELACLI_API_URL..."
+PELACLI_RESPONSE=$(curl -s -X POST "$PELACLI_API_URL" -H "$CONTENT_TYPE" -d '{"jsonrpc":"2.0","method":"ext_getTransaction","params":["0x0"],"id":0}' 2>&1)
+if [ $? -eq 0 ] && echo "$PELACLI_RESPONSE" | grep -q "jsonrpc"; then
+    print_success "Pelacli API is running!"
+else
+    print_error "Pelacli API is not responding at $PELACLI_API_URL"
+    print_error "Please start the pelacli server first"
     exit 1
 fi
 
