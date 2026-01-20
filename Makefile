@@ -25,11 +25,13 @@ build:
 down:
 	docker compose down
 
+logs:
+	docker compose logs
+
 restart: down up
 
 clean:
-	rm -Rdf appchain multichain test_consensus_app test_consensus app_data pelacli_data
-
+	rm -Rdf data
 
 tidy:
 	go mod tidy
@@ -62,3 +64,31 @@ lints:
 
 lints-fix:
 	$$(go env GOPATH)/bin/golangci-lint run ./... -v --timeout 10m --fix
+
+# CI targets (uses docker for cleanup to handle CI environment permissions)
+ci-clean:
+	docker run --rm -v $(PWD):/work alpine rm -rf /work/data
+
+ci-up: ci-clean
+	@echo "🔼 Starting CI containers with latest pelacli..."
+	docker compose pull pelacli
+	docker compose up -d --build
+
+ci-wait-healthy:
+	@echo "⏳ Waiting for services to be healthy..."
+	@for i in $$(seq 1 60); do \
+		if curl -sf http://localhost:8080/health > /dev/null 2>&1; then \
+			echo "✅ Appchain is healthy"; \
+			exit 0; \
+		fi; \
+		echo "Waiting for appchain... ($$i/60)"; \
+		sleep 2; \
+	done; \
+	echo "❌ Timeout waiting for appchain"; \
+	$(MAKE) logs; \
+	exit 1
+
+ci-test: ci-up ci-wait-healthy
+	@echo "🧪 Running integration tests..."
+	./test_txns.sh
+	@echo "✅ CI integration test passed!"
