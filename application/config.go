@@ -21,6 +21,7 @@ type BridgeConfig struct {
 type AppConfig struct {
 	gosdk.InitConfig `yaml:",inline"`
 	Bridge           BridgeConfig `yaml:"bridge"`
+	MetricsPort      int          `yaml:"metrics_port"`
 }
 
 // LoadConfig loads both SDK and bridge configuration from a YAML file.

@@ -1,0 +1,20 @@
+groups:
+  - name: bridge_alerts
+    rules:
+      - alert: BridgeServiceDown
+        expr: up{job="bridge"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bridge service is down"
+          description: "Bridge appchain has been unreachable for more than 1 minute."
+
+      - alert: BridgeTransactionStuck
+        expr: bridge_oldest_pending_timestamp > 0 and (time() - bridge_oldest_pending_timestamp) > 300
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bridge transaction stuck"
+          description: "A bridge transaction has been pending for more than 5 minutes."
