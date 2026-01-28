@@ -1,310 +1,189 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"io"
-	"net/http"
-	"strings"
-	"sync"
+	"encoding/json"
+	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/0xAtelerix/sdk/gosdk/rpc"
-	"github.com/0xAtelerix/sdk/gosdk/txpool"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	mdbxlog "github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/0xAtelerix/example/application"
 )
 
-// createTempDBWithBalance creates a temporary in-memory database with test balance data
-func createTempDBWithBalance(t *testing.T, user, token string, balance uint64) kv.RoDB {
+func setupAPITestDB(t *testing.T) kv.RwDB {
 	t.Helper()
 
-	db := memdb.New("")
-	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := mdbx.NewMDBX(mdbxlog.New()).
+		Path(dbPath).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return application.Tables()
+		}).
+		Open()
+	require.NoError(t, err)
 
-	// Create tables
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		t.Fatalf("Failed to begin transaction: %v", err)
-	}
-
-	// Create the accounts bucket/table
-	if err := tx.CreateBucket(application.AccountsBucket); err != nil {
-		t.Fatalf("Failed to create accounts bucket: %v", err)
-	}
-
-	accountKey := application.AccountKey(user, token)
-
-	balanceValue := uint256.NewInt(balance)
-	if err := tx.Put(application.AccountsBucket, accountKey, balanceValue.Bytes()); err != nil {
-		t.Fatalf("Failed to set test balance: %v", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Failed to commit transaction: %v", err)
-	}
+	t.Cleanup(func() {
+		db.Close()
+	})
 
 	return db
 }
 
-func TestCustomRPC_GetBalance(t *testing.T) {
-	// Create temp DB with balance
-	db := createTempDBWithBalance(t, "alice", "USDT", 1000)
-	defer db.Close()
+func insertAPITestEvent(t *testing.T, db kv.RwDB, event application.BridgeEvent) {
+	t.Helper()
 
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+
+		return tx.Put(application.BridgeEventsBucket, []byte(event.BridgeID), data)
+	})
+	require.NoError(t, err)
+}
+
+func testAppConfig() *application.AppConfig {
+	return &application.AppConfig{
+		Bridge: application.BridgeConfig{
+			Contracts:     map[uint64]string{},
+			TokenMappings: map[uint64]map[string]string{},
+		},
+	}
+}
+
+func TestGetBridgeStatus_Found(t *testing.T) {
+	db := setupAPITestDB(t)
 	ctx := context.Background()
 
-	// Create RPC server and custom RPC
-	rpcServer := rpc.NewStandardRPCServer(nil)
-	customRPC := NewCustomRPC(rpcServer, db)
-	customRPC.AddRPCMethods()
+	rpc := NewCustomRPC(nil, db, testAppConfig())
 
-	tests := []struct {
-		name            string
-		params          []any
-		expectedUser    string
-		expectedToken   string
-		expectedBalance string
-		expectError     bool
-	}{
-		{
-			name: "valid balance request",
-			params: []any{
-				map[string]any{
-					"user":  "alice",
-					"token": "USDT",
-				},
+	event := application.BridgeEvent{
+		BridgeID:     "0x1234",
+		SourceChain:  11155111,
+		DestChain:    50591822,
+		Status:       application.BridgeStatusConfirmed,
+		SourceTxHash: "0xsourcetx",
+	}
+	insertAPITestEvent(t, db, event)
+
+	params := []any{map[string]any{"bridgeId": "0x1234"}}
+	result, err := rpc.GetBridgeStatus(ctx, params)
+	require.NoError(t, err)
+
+	resp, ok := result.(GetBridgeStatusResponse)
+	require.True(t, ok)
+	assert.Equal(t, "0x1234", resp.BridgeID)
+	assert.Equal(t, application.BridgeStatusConfirmed, resp.Status)
+	assert.False(t, resp.Claimed)
+	assert.Equal(t, "0xsourcetx", resp.SourceTxHash)
+}
+
+func TestGetBridgeStatus_Completed(t *testing.T) {
+	db := setupAPITestDB(t)
+	ctx := context.Background()
+
+	rpc := NewCustomRPC(nil, db, testAppConfig())
+
+	event := application.BridgeEvent{
+		BridgeID:     "0x1234",
+		SourceChain:  11155111,
+		DestChain:    50591822,
+		Status:       application.BridgeStatusCompleted,
+		SourceTxHash: "0xsourcetx",
+		ClaimTxHash:  "0xclaimtx",
+	}
+	insertAPITestEvent(t, db, event)
+
+	params := []any{map[string]any{"bridgeId": "0x1234"}}
+	result, err := rpc.GetBridgeStatus(ctx, params)
+	require.NoError(t, err)
+
+	resp, ok := result.(GetBridgeStatusResponse)
+	require.True(t, ok)
+	assert.Equal(t, application.BridgeStatusCompleted, resp.Status)
+	assert.True(t, resp.Claimed)
+	assert.Equal(t, "0xclaimtx", resp.ClaimTxHash)
+}
+
+func TestGetBridgeStatus_NotFound(t *testing.T) {
+	db := setupAPITestDB(t)
+	ctx := context.Background()
+
+	rpc := NewCustomRPC(nil, db, testAppConfig())
+
+	params := []any{map[string]any{"bridgeId": "0xnonexistent"}}
+	_, err := rpc.GetBridgeStatus(ctx, params)
+	require.Error(t, err)
+	assert.Equal(t, application.ErrBridgeNotFound, err)
+}
+
+func TestGetBridgeStatus_MissingParams(t *testing.T) {
+	db := setupAPITestDB(t)
+	ctx := context.Background()
+
+	rpc := NewCustomRPC(nil, db, testAppConfig())
+
+	// Empty params
+	_, err := rpc.GetBridgeStatus(ctx, []any{})
+	require.Error(t, err)
+	assert.Equal(t, application.ErrMissingParameters, err)
+
+	// Missing bridgeId
+	params := []any{map[string]any{}}
+	_, err = rpc.GetBridgeStatus(ctx, params)
+	require.Error(t, err)
+	assert.Equal(t, application.ErrInvalidBridgeID, err)
+}
+
+func TestGetSupportedNetworks(t *testing.T) {
+	db := setupAPITestDB(t)
+	ctx := context.Background()
+
+	cfg := &application.AppConfig{
+		Bridge: application.BridgeConfig{
+			Contracts: map[uint64]string{
+				11155111: "0x844E740Ea7F404c6208fd85Ee6114a14F8037df7",
+				50591822: "0x3C1c8351a09DB0300786148B56EcB7be2FaA322e",
 			},
-			expectedUser:    "alice",
-			expectedToken:   "USDT",
-			expectedBalance: "1000",
-			expectError:     false,
-		},
-		{
-			name: "zero balance for non-existent account",
-			params: []any{
-				map[string]any{
-					"user":  "bob",
-					"token": "USDT",
-				},
-			},
-			expectedUser:    "bob",
-			expectedToken:   "USDT",
-			expectedBalance: "0",
-			expectError:     false,
-		},
-		{
-			name:        "missing parameters",
-			params:      []any{},
-			expectError: true,
-		},
-		{
-			name: "invalid parameters format",
-			params: []any{
-				"invalid",
-			},
-			expectError: true,
+			TokenMappings: map[uint64]map[string]string{},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := customRPC.GetBalance(ctx, tt.params)
+	rpc := NewCustomRPC(nil, db, cfg)
 
-			if tt.expectError {
-				if err == nil {
-					t.Error("Expected error but got none")
-				}
+	result, err := rpc.GetSupportedNetworks(ctx, nil)
+	require.NoError(t, err)
 
-				return
-			}
+	resp, ok := result.(GetSupportedNetworksResponse)
+	require.True(t, ok)
+	assert.Len(t, resp.Networks, 2)
 
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-
-				return
-			}
-
-			// Check result type
-			response, ok := result.(GetBalanceResponse)
-			if !ok {
-				t.Errorf("Expected GetBalanceResponse, got %T", result)
-
-				return
-			}
-
-			if response.User != tt.expectedUser {
-				t.Errorf("Expected user %s, got %s", tt.expectedUser, response.User)
-			}
-
-			if response.Token != tt.expectedToken {
-				t.Errorf("Expected token %s, got %s", tt.expectedToken, response.Token)
-			}
-
-			if response.Balance != tt.expectedBalance {
-				t.Errorf("Expected balance %s, got %s", tt.expectedBalance, response.Balance)
-			}
-		})
+	// Check that both networks are present
+	chainIDs := make(map[uint64]string)
+	for _, n := range resp.Networks {
+		chainIDs[n.ChainID] = n.Contract
 	}
+
+	assert.Equal(t, "0x844E740Ea7F404c6208fd85Ee6114a14F8037df7", chainIDs[11155111])
+	assert.Equal(t, "0x3C1c8351a09DB0300786148B56EcB7be2FaA322e", chainIDs[50591822])
 }
 
-// Integration test: start RPC server, send transaction, get transaction by hash
-func TestDefaultRPC_Integration_SendAndGetTransaction(t *testing.T) {
-	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(t.TempDir()).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return txpool.Tables()
-		}).
-		Open()
+func TestGetSupportedNetworks_Empty(t *testing.T) {
+	db := setupAPITestDB(t)
+	ctx := context.Background()
+
+	rpc := NewCustomRPC(nil, db, testAppConfig())
+
+	result, err := rpc.GetSupportedNetworks(ctx, nil)
 	require.NoError(t, err)
 
-	defer localDB.Close()
-
-	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
-		localDB,
-	)
-
-	// Create appchain DB for AddStandardMethods
-	appchainDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(t.TempDir()).
-		Open()
-	require.NoError(t, err)
-
-	defer appchainDB.Close()
-
-	rpcServer := rpc.NewStandardRPCServer(nil)
-	rpc.AddStandardMethods[
-		application.Transaction[application.Receipt],
-		application.Receipt,
-		application.Block,
-	](rpcServer, appchainDB, txPool, 42)
-
-	rpcAddress := "http://127.0.0.1:18545/rpc"
-
-	errServer := make(chan error, 1)
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	go func() {
-		wg.Done()
-
-		errServer <- rpcServer.StartHTTPServer(t.Context(), ":18545")
-	}()
-
-	select {
-	case serverErr := <-errServer:
-		if serverErr != nil {
-			t.Fatalf("Failed to start HTTP server: %v", serverErr)
-		}
-	default:
-		// continue
-		wg.Wait()
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-
-	// Send transaction via JSON-RPC (include hash)
-	jsonReq := `{"jsonrpc":"2.0","method":"sendTransaction","params":[{"sender":"alice","token":"USDT","amount":"1234","hash":"` + txHash + `"}],"id":1}`
-	resp, err := sendJSONRPCRequest(rpcAddress, jsonReq)
-	require.NoError(t, err)
-	require.Contains(t, resp, "result")
-
-	jsonReqGet := `{"jsonrpc":"2.0","method":"getTransaction","params":["` + txHash + `"],"id":2}`
-	respGet, err := sendJSONRPCRequest(rpcAddress, jsonReqGet)
-	require.NoError(t, err)
-	require.Contains(t, respGet, "result")
-
-	require.Contains(t, respGet, "alice")
-	require.Contains(t, respGet, "USDT")
-	require.Contains(t, respGet, "1234")
-}
-
-func TestCustomRPC_GetBalance_NilDatabase(t *testing.T) {
-	// Test with nil database
-	rpcServer := rpc.NewStandardRPCServer(nil)
-	customRPC := NewCustomRPC(rpcServer, nil)
-
-	params := []any{
-		map[string]any{
-			"user":  "alice",
-			"token": "USDT",
-		},
-	}
-
-	_, err := customRPC.GetBalance(context.Background(), params)
-	if err == nil || !strings.Contains(err.Error(), application.ErrDatabaseNotAvailable.Error()) {
-		t.Errorf(
-			"Expected error containing %q, got %v",
-			application.ErrDatabaseNotAvailable.Error(),
-			err,
-		)
-	}
-}
-
-func TestDefaultRPC_MethodRegistration(t *testing.T) {
-	// Create local DB for txpool
-	localDB, err := mdbx.NewMDBX(mdbxlog.New()).
-		Path(t.TempDir()).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return txpool.Tables()
-		}).
-		Open()
-	require.NoError(t, err)
-
-	defer localDB.Close()
-
-	// Create txpool
-	txPool := txpool.NewTxPool[application.Transaction[application.Receipt], application.Receipt](
-		localDB,
-	)
-
-	// Create RPC server and add standard methods
-	rpcServer := rpc.NewStandardRPCServer(nil)
-
-	// Test that AddStandardMethods doesn't panic (even with minimal setup)
-	require.NotPanics(t, func() {
-		rpc.AddStandardMethods[
-			application.Transaction[application.Receipt],
-			application.Receipt,
-			application.Block,
-		](rpcServer, nil, txPool, 42)
-	})
-}
-
-// Helper: send JSON-RPC request to local server
-func sendJSONRPCRequest(rpcAddress string, jsonReq string) (string, error) {
-	req, err := http.NewRequestWithContext(
-		context.Background(),
-		http.MethodPost,
-		rpcAddress,
-		bytes.NewBufferString(jsonReq),
-	)
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(body), nil
+	resp, ok := result.(GetSupportedNetworksResponse)
+	require.True(t, ok)
+	assert.Empty(t, resp.Networks)
 }

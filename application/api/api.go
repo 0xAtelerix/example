@@ -3,10 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/0xAtelerix/sdk/gosdk/rpc"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/0xAtelerix/example/application"
@@ -15,89 +15,75 @@ import (
 type CustomRPC struct {
 	rpcServer *rpc.StandardRPCServer
 	db        kv.RoDB
+	cfg       *application.AppConfig
 }
 
-func NewCustomRPC(rpcServer *rpc.StandardRPCServer, db kv.RoDB) *CustomRPC {
+func NewCustomRPC(
+	rpcServer *rpc.StandardRPCServer,
+	db kv.RoDB,
+	cfg *application.AppConfig,
+) *CustomRPC {
 	return &CustomRPC{
 		rpcServer: rpcServer,
 		db:        db,
+		cfg:       cfg,
 	}
 }
 
 func (c *CustomRPC) AddRPCMethods() {
-	c.rpcServer.AddMethod("getBalance", c.GetBalance)
+	c.rpcServer.AddMethod("getBridgeStatus", c.GetBridgeStatus)
+	c.rpcServer.AddMethod("getSupportedNetworks", c.GetSupportedNetworks)
 }
 
-func (c *CustomRPC) GetBalance(ctx context.Context, params []any) (any, error) {
+// GetSupportedNetworks returns the list of supported networks and their bridge contracts
+func (c *CustomRPC) GetSupportedNetworks(_ context.Context, _ []any) (any, error) {
+	networks := make([]NetworkInfo, 0, len(c.cfg.Bridge.Contracts))
+
+	for chainID, contract := range c.cfg.Bridge.Contracts {
+		networks = append(networks, NetworkInfo{
+			ChainID:  chainID,
+			Contract: contract,
+		})
+	}
+
+	return GetSupportedNetworksResponse{Networks: networks}, nil
+}
+
+// GetBridgeStatus retrieves the status of a bridge event
+func (c *CustomRPC) GetBridgeStatus(ctx context.Context, params []any) (any, error) {
 	if len(params) == 0 {
 		return nil, application.ErrMissingParameters
 	}
 
-	// Convert params[0] directly to balanceReq using json marshal/unmarshal
 	paramBytes, err := json.Marshal(params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal parameter: %w", err)
 	}
 
-	var balanceReq GetBalanceRequest
-	if unmarshalErr := json.Unmarshal(paramBytes, &balanceReq); unmarshalErr != nil {
+	var req GetBridgeStatusRequest
+
+	if unmarshalErr := json.Unmarshal(paramBytes, &req); unmarshalErr != nil {
 		return nil, fmt.Errorf("invalid parameters: %w", unmarshalErr)
 	}
 
-	// Get balance from database
-	balance, err := c.getBalance(ctx, balanceReq.User, balanceReq.Token)
+	if req.BridgeID == "" {
+		return nil, application.ErrInvalidBridgeID
+	}
+
+	event, err := application.GetBridgeEvent(ctx, c.db, req.BridgeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get balance: %w", err)
+		if errors.Is(err, application.ErrBridgeNotFound) {
+			return nil, application.ErrBridgeNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get bridge status: %w", err)
 	}
 
-	response := GetBalanceResponse{
-		User:    balanceReq.User,
-		Token:   balanceReq.Token,
-		Balance: balance.String(),
-	}
-
-	return response, nil
-}
-
-func (c *CustomRPC) getBalance(
-	ctx context.Context,
-	user, token string,
-) (*uint256.Int, error) {
-	if c.db == nil {
-		return uint256.NewInt(0), application.ErrDatabaseNotAvailable
-	}
-
-	tx, err := c.db.BeginRo(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Get balance from accounts bucket
-	accountKey := application.AccountKey(user, token)
-
-	balanceData, err := tx.GetOne(application.AccountsBucket, accountKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get balance: %w", err)
-	}
-
-	balance := uint256.NewInt(0)
-	if len(balanceData) > 0 {
-		balance.SetBytes(balanceData)
-	}
-
-	return balance, nil
-}
-
-// GetBalanceRequest represents a balance query request
-type GetBalanceRequest struct {
-	User  string `json:"user"`
-	Token string `json:"token"`
-}
-
-// GetBalanceResponse represents a balance query response
-type GetBalanceResponse struct {
-	User    string `json:"user"`
-	Token   string `json:"token"`
-	Balance string `json:"balance"`
+	return GetBridgeStatusResponse{
+		BridgeID:     req.BridgeID,
+		Status:       event.Status,
+		Claimed:      event.Status == application.BridgeStatusCompleted,
+		SourceTxHash: event.SourceTxHash,
+		ClaimTxHash:  event.ClaimTxHash,
+	}, nil
 }

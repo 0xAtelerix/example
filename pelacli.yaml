@@ -1,0 +1,27 @@
+data_dir: "/data"
+
+consensus:
+  ask_period: 1s
+
+api:
+  port: 8081
+
+appchains:
+  - chain_id: 42
+    address: "appchain:9090"
+
+read_chains: # Sepolia default available in pelacli for read
+  - chain_id: 50591822            # Stavanger testnet
+    api_key: "wss://stavanger-rpc.eu-north-2.gateway.fm/ws"
+    block_offset: 1
+
+write_chains:
+  - chain_id: 11155111            # Ethereum Sepolia
+    rpc_url: "https://eth-sepolia.g.alchemy.com/v2/bEzb7Rb14hzR79tLw-gfy"
+    private_key: "e98608987ecc7b3315bee23e86a5c1cfb6288159d0a3c2009335f4494bd4579a"
+    pelagos_contract: "0x049FBea1295B569378Fe0D5AB965131743f332b9"
+
+  - chain_id: 50591822            # Stavanger testnet
+    rpc_url: "https://stavanger-rpc.eu-north-2.gateway.fm"
+    private_key: "e98608987ecc7b3315bee23e86a5c1cfb6288159d0a3c2009335f4494bd4579a"
+    pelagos_contract: "0x416b560B03e6d9EF473bf57ccbb2A569AF5d0736"

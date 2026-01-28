@@ -10,11 +10,11 @@ import (
 var _ apptypes.AppchainBlock = Block{}
 
 type Block struct {
-	BlockNum     uint64                 `json:"number"`
-	BlockHash    [32]byte               `json:"blockHash"`
-	ParentHash   [32]byte               `json:"parentHash"`
-	Root         [32]byte               `json:"root"`
-	Transactions []Transaction[Receipt] `json:"transactions,omitempty"`
+	BlockNum     uint64        `json:"number"`
+	BlockHash    [32]byte      `json:"blockHash"`
+	ParentHash   [32]byte      `json:"parentHash"`
+	Root         [32]byte      `json:"root"`
+	Transactions []Transaction `json:"transactions,omitempty"`
 }
 
 func (b Block) Hash() [32]byte {
@@ -26,10 +26,10 @@ func (b Block) StateRoot() [32]byte {
 }
 
 func BlockConstructor(
-	blockNumber uint64, // blockNumber
-	stateRoot [32]byte, // stateRoot
-	previousBlockHash [32]byte, // previousBlockHash
-	batch apptypes.Batch[Transaction[Receipt], Receipt], // txsBatch
+	blockNumber uint64,
+	stateRoot [32]byte,
+	previousBlockHash [32]byte,
+	batch apptypes.Batch[Transaction, Receipt],
 ) *Block {
 	hasher := sha256.New()
 
@@ -39,7 +39,6 @@ func BlockConstructor(
 	hasher.Write(stateRoot[:])
 	hasher.Write(previousBlockHash[:])
 
-	// Compute final hash
 	var blockHash [32]byte
 	copy(blockHash[:], hasher.Sum(nil))
 

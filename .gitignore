@@ -1,7 +1,7 @@
 .idea
 .vscode
-appchain
 main
 data/
 config.yaml
 pelacli.yaml
+CLAUDE.md

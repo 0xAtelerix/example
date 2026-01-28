@@ -7,8 +7,9 @@ func (e Error) Error() string {
 }
 
 const (
-	ErrNotEnoughBalance     = Error("sender's balance not enough")
-	ErrDatabaseNil          = Error("database is nil")
-	ErrMissingParameters    = Error("missing parameters")
-	ErrDatabaseNotAvailable = Error("database not available")
+	ErrMissingParameters = Error("missing parameters")
+
+	// Bridge errors
+	ErrBridgeNotFound  = Error("bridge not found")
+	ErrInvalidBridgeID = Error("invalid bridge ID")
 )

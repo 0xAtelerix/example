@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pelagos Bridge | Cross-Chain Bridge</title>
+    <link rel="icon" href="Pelagos_primary_logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <img src="Pelagos_primary_logo.svg" alt="Pelagos" class="logo-svg">
+                <span class="brand-name">Bridge</span>
+                <span class="badge-beta">BETA</span>
+            </div>
+            <div class="nav-links">
+                <button class="nav-link active" data-tab="bridge">Bridge</button>
+                <button class="nav-link" data-tab="faucet">Faucet</button>
+                <button class="nav-link" data-tab="history">History</button>
+            </div>
+            <div class="nav-wallet">
+                <button class="btn-connect" id="walletBtn" onclick="toggleWallet()">
+                    Connect Wallet
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container">
+        <!-- Bridge Tab -->
+        <div id="tab-bridge" class="tab-content active">
+            <div class="bridge-card">
+                <div class="card-body">
+                    <!-- From Section -->
+                    <div class="transfer-section">
+                        <div class="section-header">
+                            <span>From</span>
+                            <span class="balance" id="fromBalance">Balance: --</span>
+                        </div>
+                        <div class="input-group">
+                            <div class="network-selector" id="fromNetwork" onclick="showNetworkModal('from')">
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E" alt="Network" class="network-icon" id="fromIcon">
+                                <span class="network-name" id="fromName">Select Network</span>
+                                <svg class="chevron" width="20" height="20" viewBox="0 0 20 20">
+                                    <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" stroke-width="2" fill="none"/>
+                                </svg>
+                            </div>
+                            <div class="token-selector" id="fromToken">
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%238247e5'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='IBM%20Plex%20Mono' font-size='16' font-weight='bold'%3EPOL%3C/text%3E%3C/svg%3E" alt="POL" class="token-icon">
+                                <span>POL</span>
+                            </div>
+                        </div>
+                        <div class="amount-input-wrapper">
+                            <input type="number" id="amountInput" class="amount-input" placeholder="0.0" step="0.01" min="0">
+                            <button class="btn-max" onclick="setMaxAmount()">MAX</button>
+                        </div>
+                    </div>
+
+                    <!-- Swap Direction Button -->
+                    <div class="swap-direction">
+                        <button class="btn-swap" onclick="swapDirection()" title="Swap direction">
+                            <svg width="24" height="24" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" size="16" class="css-in2lde">
+                                <g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M9.599 2.4v11.2l3.2-3.476M6.4 13.6V2.4L3.2 5.875"></path>
+                                </g>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- To Section -->
+                    <div class="transfer-section">
+                        <div class="section-header">
+                            <span>To</span>
+                            <span class="balance" id="toBalance">Balance: --</span>
+                            <span class="liquidity" id="bridgeLiquidity">Liquidity: --</span>
+                        </div>
+                        <div class="input-group">
+                            <div class="network-selector" id="toNetwork" onclick="showNetworkModal('to')">
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E" alt="Network" class="network-icon" id="toIcon">
+                                <span class="network-name" id="toName">Select Network</span>
+                                <svg class="chevron" width="20" height="20" viewBox="0 0 20 20">
+                                    <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" stroke-width="2" fill="none"/>
+                                </svg>
+                            </div>
+                            <div class="token-selector" id="toToken">
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%238247e5'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='IBM%20Plex%20Mono' font-size='16' font-weight='bold'%3EPOL%3C/text%3E%3C/svg%3E" alt="POL" class="token-icon">
+                                <span>POL</span>
+                            </div>
+                        </div>
+                        <div class="destination-address" id="destinationAddress">
+                            <span class="destination-label">To:</span>
+                            <span class="destination-value" id="destinationValue">Connect wallet</span>
+                            <input type="text" id="recipientInput" class="recipient-input-inline" placeholder="Enter address" style="display: none;">
+                            <button class="btn-change-recipient" id="btnChangeRecipient" onclick="toggleRecipientEdit()" style="display: none;">Change</button>
+                        </div>
+                    </div>
+
+                    <!-- Bridge Summary -->
+                    <div class="bridge-summary" id="bridgeSummary" style="display: none;">
+                        <div class="summary-row">
+                            <span>You will receive</span>
+                            <span id="receiveAmount">-- POL</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Estimated time</span>
+                            <span>~30 secs</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Bridge fee</span>
+                            <span>No fees</span>
+                        </div>
+                    </div>
+
+                    <!-- Bridge Button -->
+                    <button class="btn-bridge" id="bridgeBtn" onclick="initiateBridge()" disabled>
+                        Connect Wallet to Bridge
+                    </button>
+
+                    <!-- Status Messages -->
+                    <div id="statusMessage" class="status-message" style="display: none;"></div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Faucet Tab -->
+        <div id="tab-faucet" class="tab-content">
+            <div class="faucet-card">
+                <div class="faucet-header">
+                    <div class="faucet-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2v6M12 22v-6M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M22 12h-6M4.93 19.07l4.24-4.24M14.83 9.17l4.24-4.24"/>
+                        </svg>
+                    </div>
+                    <h2>Test Token Faucet</h2>
+                    <p>Get free test POL tokens on Sepolia to try the bridge</p>
+                </div>
+                <div class="faucet-body">
+                    <div class="faucet-info">
+                        <div class="faucet-info-row">
+                            <span>Network</span>
+                            <span class="faucet-value">Sepolia (Ethereum Testnet)</span>
+                        </div>
+                        <div class="faucet-info-row">
+                            <span>Token</span>
+                            <span class="faucet-value">POL (Test Token)</span>
+                        </div>
+                        <div class="faucet-info-row">
+                            <span>Amount</span>
+                            <span class="faucet-value">10 POL per request</span>
+                        </div>
+                        <div class="faucet-info-row">
+                            <span>Your Balance</span>
+                            <span class="faucet-value" id="faucetBalance">Connect wallet</span>
+                        </div>
+                    </div>
+                    <button class="btn-faucet-main" id="faucetBtn" onclick="mintTestPOL()">
+                        Get 10 Test POL
+                    </button>
+                    <div id="faucetStatus" class="faucet-status" style="display: none;"></div>
+                    <div class="faucet-note">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4M12 8h.01"/>
+                        </svg>
+                        <span>Test tokens have no real value. Use them to test the bridge functionality.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="tab-history" class="tab-content">
+            <div class="history-card">
+                <div class="history-header">
+                    <h2>Transaction History</h2>
+                    <button class="btn-clear-history" onclick="clearHistory()">Clear History</button>
+                </div>
+                <div class="history-list" id="historyList">
+                    <div class="empty-state">
+                        <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                            <circle cx="32" cy="32" r="30" stroke="#e5e7eb" stroke-width="4"/>
+                            <path d="M32 16V32L42 42" stroke="#9ca3af" stroke-width="4" stroke-linecap="round"/>
+                        </svg>
+                        <p>No transactions yet</p>
+                        <span>Your bridge transactions will appear here</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Network Modal -->
+    <div id="networkModal" class="modal">
+        <div class="modal-backdrop" onclick="closeNetworkModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Select Network</h3>
+                <button class="modal-close" onclick="closeNetworkModal()">×</button>
+            </div>
+            <div class="network-list">
+                <button class="network-option" onclick="selectNetwork('sepolia')">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%23627eea'/%3E%3Cpath d='M16 4L15.5 5.5L15.5 20.5L16 21L24 16.5z' fill='white'/%3E%3Cpath d='M16 4L8 16.5L16 21z' fill='%23c1cde9'/%3E%3C/svg%3E" alt="Sepolia">
+                    <div>
+                        <div class="network-option-name">Sepolia</div>
+                        <div class="network-option-desc">Ethereum Testnet</div>
+                    </div>
+                    <svg class="check-icon" width="20" height="20" viewBox="0 0 20 20">
+                        <path d="M4 10L8 14L16 6" stroke="currentColor" stroke-width="2" fill="none"/>
+                    </svg>
+                </button>
+                <button class="network-option" onclick="selectNetwork('stavanger')">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%238247e5'/%3E%3Cpath d='M10 8L16 12L22 8L16 4z' fill='white'/%3E%3Cpath d='M10 16L16 20L22 16L16 12z' fill='%23b794f6'/%3E%3Cpath d='M10 24L16 28L22 24L16 20z' fill='white'/%3E%3C/svg%3E" alt="Stavanger">
+                    <div>
+                        <div class="network-option-name">Stavanger</div>
+                        <div class="network-option-desc">L2 Rollup</div>
+                    </div>
+                    <svg class="check-icon" width="20" height="20" viewBox="0 0 20 20">
+                        <path d="M4 10L8 14L16 6" stroke="currentColor" stroke-width="2" fill="none"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

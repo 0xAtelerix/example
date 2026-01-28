@@ -5,12 +5,12 @@ services:
     working_dir: /app
     volumes:
       - ./data:/data
-      # - ./pelacli.yaml:/config/pelacli.yaml
+      - ./pelacli.yaml:/config/pelacli.yaml:ro
     ports:
       - "8081:8081"
     command:
       - consensus
-      # - --config=/config/pelacli.yaml
+      - --config=/config/pelacli.yaml
 
   appchain:
     build:
@@ -21,22 +21,32 @@ services:
     image: appchain:latest
     volumes:
       - ./data:/data
-      # - ./config.yaml:/config/config.yaml
+      - ./config.yaml:/config/config.yaml:ro
     ports:
       - "9090:9090"
       - "8080:8080"
     depends_on:
       - pelacli
-    # command:
-    #   - -config=/config/config.yaml
+    command:
+      - -config=/config/config.yaml
+
+  frontend:
+    image: nginx:alpine
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "3000:80"
+    depends_on:
+      - appchain
 
   explorer:
     image: pelagosnetwork/explorer:latest
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - RPC_URL=http://localhost:8080/rpc
       - EXTERNAL_RPC_URL=http://localhost:8081/rpc
     depends_on:
       - appchain
       - pelacli
+

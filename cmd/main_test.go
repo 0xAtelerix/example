@@ -36,37 +36,45 @@ func waitUntil(ctx context.Context, f func() bool) error {
 	}
 }
 
-// TestEndToEnd spins up the appchain, posts a transaction to the /rpc endpoint and
+// TestEndToEnd spins up the appchain, posts a request to the /rpc endpoint and
 // verifies we get a 2xx response.
 func TestEndToEnd(t *testing.T) {
 	port := getFreePort(t)
 	dataDir := t.TempDir()
-	chainID := uint64(1001)
+	chainID := uint64(42)
 
-	// Create required directories and databases
-	// SDK's InitApp() expects these paths to exist
+	// Create required directories
 	txBatchPath := gosdk.TxBatchPathForChain(dataDir, chainID)
 	eventsPath := gosdk.EventsPath(dataDir)
 
 	require.NoError(t, os.MkdirAll(txBatchPath, 0o755))
 	require.NoError(t, os.MkdirAll(eventsPath, 0o755))
 
-	// Create TxBatchDB (normally created by pelacli's fetcher)
+	// Create empty TxBatchDB
 	err := createEmptyMDBXDatabase(txBatchPath, gosdk.TxBucketsTables())
 	require.NoError(t, err, "create empty txBatch database")
 
-	// Create config with test values
-	cfg := &gosdk.InitConfig{
-		ChainID:        &chainID,
-		DataDir:        dataDir,
-		EmitterPort:    ":0", // Let OS choose
-		RPCPort:        fmt.Sprintf(":%d", port),
-		RequiredChains: []uint64{},
+	// Create test config with embedded SDK config and bridge config
+	cfg := &application.AppConfig{
+		InitConfig: gosdk.InitConfig{
+			ChainID:        &chainID,
+			DataDir:        dataDir,
+			EmitterPort:    ":0",
+			RPCPort:        fmt.Sprintf(":%d", port),
+			RequiredChains: []uint64{},
+			CustomTables:   application.Tables(),
+		},
+		Bridge: application.BridgeConfig{
+			Contracts:     map[uint64]string{},
+			TokenMappings: map[uint64]map[string]string{},
+		},
 	}
 
-	// Create cancellable context for the test
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+
+	// Setup logger
+	ctx = gosdk.SetupLogger(ctx, 1) // Info level
 
 	// Run appchain in background
 	go func() {
@@ -75,40 +83,36 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}()
 
-	// Wait until HTTP service is up
+	// Wait for HTTP service
 	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/rpc", port)
 
 	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer waitCancel()
 
 	err = waitUntil(waitCtx, func() bool {
-		req, reqErr := http.NewRequestWithContext(waitCtx, http.MethodGet, rpcURL, nil)
-		if reqErr != nil {
-			return false
-		}
+		req, _ := http.NewRequestWithContext(waitCtx, http.MethodGet, rpcURL, nil)
 
 		resp, respErr := http.DefaultClient.Do(req)
 		if respErr != nil {
 			return false
 		}
 
-		_ = resp.Body.Close()
+		resp.Body.Close()
 
 		return true
 	})
 	require.NoError(t, err, "JSON-RPC service never became ready")
 
-	// Build & send a transaction
-	tx := application.Transaction[application.Receipt]{
-		Sender: "Vasya",
-		Value:  42,
-		TxHash: "deadbeef",
+	// Test getBridgeStatus RPC method
+	rpcRequest := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "getBridgeStatus",
+		"params":  []any{map[string]string{"bridgeId": "0x1234"}},
+		"id":      1,
 	}
 
 	var buf bytes.Buffer
-
-	err = json.NewEncoder(&buf).Encode(tx)
-	require.NoError(t, err, "encode tx")
+	require.NoError(t, json.NewEncoder(&buf).Encode(rpcRequest))
 
 	req, err := http.NewRequestWithContext(
 		waitCtx,
@@ -127,13 +131,22 @@ func TestEndToEnd(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 	}()
 
-	require.True(t, resp.StatusCode >= 200 && resp.StatusCode < 300,
-		"unexpected HTTP status: %s", resp.Status)
+	require.True(
+		t,
+		resp.StatusCode >= 200 && resp.StatusCode < 300,
+		"unexpected HTTP status: %s",
+		resp.Status,
+	)
 
-	// Cancel context to trigger graceful shutdown
+	// Verify we get a valid JSON-RPC response (error expected since bridge doesn't exist)
+	var rpcResp map[string]any
+
+	err = json.NewDecoder(resp.Body).Decode(&rpcResp)
+	require.NoError(t, err, "decode rpc response")
+	// We expect an error since the bridge doesn't exist, but the RPC endpoint works
+	require.NotNil(t, rpcResp["error"], "expected error in response for non-existent bridge")
+
 	cancel()
-
-	// Give Run() a moment to tear down
 	time.Sleep(500 * time.Millisecond)
 
 	t.Log("Success!")
@@ -158,7 +171,7 @@ func getFreePort(t *testing.T) int {
 	return port
 }
 
-// createEmptyMDBXDatabase creates an empty MDBX database that can be opened in readonly mode.
+// createEmptyMDBXDatabase creates an empty MDBX database that can be opened in readonly mode
 func createEmptyMDBXDatabase(dbPath string, tableCfg kv.TableCfg) error {
 	tempDB, err := mdbx.NewMDBX(mdbxlog.New()).
 		Path(dbPath).

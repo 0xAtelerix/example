@@ -1,0 +1,26 @@
+chain_id: 42
+
+data_dir: "/data"
+
+emitter_port: ":9090"
+
+rpc_port: ":8080"
+
+log_level: 1
+
+required_chains:
+  - 11155111  # Ethereum Sepolia testnet
+  - 50591822  # Stavanger testnet
+
+bridge:
+  contracts:
+    11155111: "0x844E740Ea7F404c6208fd85Ee6114a14F8037df7"  # Sepolia
+    50591822: "0x3C1c8351a09DB0300786148B56EcB7be2FaA322e"  # Stavanger
+
+  token_mappings:
+    # Sepolia -> Stavanger: POL ERC20 -> native
+    11155111:
+      "0x6a7c3f4b0651d6da389ad1d11d962ea458cdca70": "0x0000000000000000000000000000000000000000"
+    # Stavanger -> Sepolia: native -> POL ERC20
+    50591822:
+      "0x0000000000000000000000000000000000000000": "0x6a7c3f4b0651d6da389ad1d11d962ea458cdca70"
