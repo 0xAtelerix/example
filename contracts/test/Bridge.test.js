@@ -3,17 +3,17 @@ const { ethers } = require("hardhat");
 
 describe("Bridge", function () {
   let bridge;
+  let pelagos;
   let mockToken;
   let owner;
-  let validator;
   let user1;
   let user2;
 
-  const SEPOLIA_CHAIN_ID = 11155111;
   const AMOY_CHAIN_ID = 80002;
+  const APP_CHAIN_ID = 1604;
 
   beforeEach(async function () {
-    [owner, validator, user1, user2] = await ethers.getSigners();
+    [owner, user1, user2] = await ethers.getSigners();
 
     // Deploy mock token
     const MockERC20 = await ethers.getContractFactory("MockERC20");
@@ -23,17 +23,22 @@ describe("Bridge", function () {
     // Mint tokens to user1
     await mockToken.mint(user1.address, ethers.parseUnits("10000", 6));
 
-    // Deploy bridge
+    // Deploy Pelagos
+    const Pelagos = await ethers.getContractFactory("Pelagos");
+    pelagos = await Pelagos.deploy();
+    await pelagos.waitForDeployment();
+
+    // Deploy Bridge
     const Bridge = await ethers.getContractFactory("Bridge");
-    bridge = await Bridge.deploy(validator.address);
+    bridge = await Bridge.deploy();
     await bridge.waitForDeployment();
+
+    // Wire them together
+    await bridge.setPelagosContract(await pelagos.getAddress());
+    await pelagos.registerAppchainContract(APP_CHAIN_ID, await bridge.getAddress());
   });
 
   describe("Deployment", function () {
-    it("Should set the correct validator", async function () {
-      expect(await bridge.validator()).to.equal(validator.address);
-    });
-
     it("Should set the correct chainId", async function () {
       expect(await bridge.chainId()).to.equal(31337); // Hardhat network
     });
@@ -41,9 +46,23 @@ describe("Bridge", function () {
     it("Should set the correct owner", async function () {
       expect(await bridge.owner()).to.equal(owner.address);
     });
+
+    it("Should set the correct Pelagos contract", async function () {
+      expect(await bridge.pelagosContract()).to.equal(await pelagos.getAddress());
+    });
   });
 
-  describe("BridgeAsset", function () {
+  describe("Pelagos", function () {
+    it("Should register bridge with Pelagos", async function () {
+      expect(await pelagos.appchainContracts(APP_CHAIN_ID)).to.equal(await bridge.getAddress());
+    });
+
+    it("Should have owner as Pelagos owner", async function () {
+      expect(await pelagos.owner()).to.equal(owner.address);
+    });
+  });
+
+  describe("BridgeAsset - ERC20", function () {
     it("Should lock tokens and emit BridgeInitiated event", async function () {
       const amount = ethers.parseUnits("1000", 6);
 
@@ -52,10 +71,11 @@ describe("Bridge", function () {
 
       // Bridge tokens
       const tx = await bridge.connect(user1).bridgeAsset(
+        await mockToken.getAddress(),
+        amount,
         AMOY_CHAIN_ID,
         user2.address,
-        await mockToken.getAddress(),
-        amount
+        "0x" // no permit data
       );
 
       const receipt = await tx.wait();
@@ -81,10 +101,11 @@ describe("Bridge", function () {
 
       await expect(
         bridge.connect(user1).bridgeAsset(
+          await mockToken.getAddress(),
+          amount,
           31337, // Same as source
           user2.address,
-          await mockToken.getAddress(),
-          amount
+          "0x"
         )
       ).to.be.revertedWithCustomError(bridge, "InvalidDestinationChain");
     });
@@ -92,10 +113,11 @@ describe("Bridge", function () {
     it("Should revert if amount is zero", async function () {
       await expect(
         bridge.connect(user1).bridgeAsset(
+          await mockToken.getAddress(),
+          0,
           AMOY_CHAIN_ID,
           user2.address,
-          await mockToken.getAddress(),
-          0
+          "0x"
         )
       ).to.be.revertedWithCustomError(bridge, "InvalidAmount");
     });
@@ -106,25 +128,13 @@ describe("Bridge", function () {
 
       await expect(
         bridge.connect(user1).bridgeAsset(
+          await mockToken.getAddress(),
+          amount,
           AMOY_CHAIN_ID,
           ethers.ZeroAddress,
-          await mockToken.getAddress(),
-          amount
+          "0x"
         )
       ).to.be.revertedWithCustomError(bridge, "InvalidRecipient");
-    });
-
-    it("Should revert if token is zero address", async function () {
-      const amount = ethers.parseUnits("1000", 6);
-
-      await expect(
-        bridge.connect(user1).bridgeAsset(
-          AMOY_CHAIN_ID,
-          user2.address,
-          ethers.ZeroAddress,
-          amount
-        )
-      ).to.be.revertedWithCustomError(bridge, "InvalidToken");
     });
 
     it("Should increment bridge nonce", async function () {
@@ -134,26 +144,86 @@ describe("Bridge", function () {
       expect(await bridge.bridgeNonce()).to.equal(0);
 
       await bridge.connect(user1).bridgeAsset(
+        await mockToken.getAddress(),
+        amount,
         AMOY_CHAIN_ID,
         user2.address,
-        await mockToken.getAddress(),
-        amount
+        "0x"
       );
       expect(await bridge.bridgeNonce()).to.equal(1);
 
       await bridge.connect(user1).bridgeAsset(
+        await mockToken.getAddress(),
+        amount,
         AMOY_CHAIN_ID,
         user2.address,
-        await mockToken.getAddress(),
-        amount
+        "0x"
       );
       expect(await bridge.bridgeNonce()).to.equal(2);
     });
   });
 
-  describe("ClaimAsset", function () {
-    let bridgeId;
+  describe("BridgeAsset - Native Token", function () {
+    it("Should lock native tokens and emit BridgeInitiated event", async function () {
+      const amount = ethers.parseEther("1");
+
+      const tx = await bridge.connect(user1).bridgeAsset(
+        ethers.ZeroAddress, // native token
+        amount,
+        AMOY_CHAIN_ID,
+        user2.address,
+        "0x",
+        { value: amount }
+      );
+
+      const receipt = await tx.wait();
+      const event = receipt.logs.find(
+        log => log.fragment && log.fragment.name === "BridgeInitiated"
+      );
+
+      expect(event).to.not.be.undefined;
+      expect(event.args.token).to.equal(ethers.ZeroAddress);
+      expect(event.args.amount).to.equal(amount);
+
+      // Check native tokens were locked
+      expect(await ethers.provider.getBalance(await bridge.getAddress())).to.equal(amount);
+    });
+
+    it("Should revert if msg.value does not match amount for native token", async function () {
+      const amount = ethers.parseEther("1");
+
+      await expect(
+        bridge.connect(user1).bridgeAsset(
+          ethers.ZeroAddress,
+          amount,
+          AMOY_CHAIN_ID,
+          user2.address,
+          "0x",
+          { value: ethers.parseEther("0.5") } // Wrong value
+        )
+      ).to.be.revertedWithCustomError(bridge, "InvalidAmount");
+    });
+
+    it("Should revert if msg.value is sent for ERC20 token", async function () {
+      const amount = ethers.parseUnits("1000", 6);
+      await mockToken.connect(user1).approve(await bridge.getAddress(), amount);
+
+      await expect(
+        bridge.connect(user1).bridgeAsset(
+          await mockToken.getAddress(),
+          amount,
+          AMOY_CHAIN_ID,
+          user2.address,
+          "0x",
+          { value: ethers.parseEther("0.1") } // Should not send value for ERC20
+        )
+      ).to.be.revertedWithCustomError(bridge, "InvalidAmount");
+    });
+  });
+
+  describe("ExecuteTransaction (via Pelagos)", function () {
     const amount = ethers.parseUnits("500", 6);
+    let bridgeId;
 
     beforeEach(async function () {
       // Add liquidity to bridge for claims
@@ -163,77 +233,81 @@ describe("Bridge", function () {
       bridgeId = ethers.keccak256(
         ethers.AbiCoder.defaultAbiCoder().encode(
           ["uint256", "uint256", "address", "uint256", "address", "uint256"],
-          [SEPOLIA_CHAIN_ID, 31337, await mockToken.getAddress(), amount, user2.address, Date.now()]
+          [11155111, 31337, await mockToken.getAddress(), amount, user2.address, Date.now()]
         )
       );
     });
 
-    it("Should claim tokens and emit AssetClaimed event", async function () {
-      const tx = await bridge.connect(validator).claimAsset(
-        bridgeId,
-        SEPOLIA_CHAIN_ID,
-        await mockToken.getAddress(),
-        amount,
-        user2.address
-      );
+    it("Should execute transaction via Pelagos and transfer tokens", async function () {
+      // Build payload (160 bytes): bridgeId + sourceChainId + token + amount + recipient
+      const tokenAddress = await mockToken.getAddress();
 
-      const receipt = await tx.wait();
-      const event = receipt.logs.find(
-        log => log.fragment && log.fragment.name === "AssetClaimed"
-      );
+      // Token and recipient are LEFT-aligned (20 bytes + 12 zero bytes)
+      const tokenPadded = tokenAddress + "000000000000000000000000";
+      const recipientPadded = user2.address + "000000000000000000000000";
 
-      expect(event).to.not.be.undefined;
-      expect(event.args.bridgeId).to.equal(bridgeId);
-      expect(event.args.recipient).to.equal(user2.address);
-      expect(event.args.token).to.equal(await mockToken.getAddress());
-      expect(event.args.amount).to.equal(amount);
+      const payload = ethers.concat([
+        bridgeId,                                          // 32 bytes
+        ethers.zeroPadValue(ethers.toBeHex(11155111), 32), // 32 bytes sourceChainId
+        tokenPadded,                                       // 32 bytes token (left-aligned)
+        ethers.zeroPadValue(ethers.toBeHex(amount), 32),   // 32 bytes amount
+        recipientPadded                                    // 32 bytes recipient (left-aligned)
+      ]);
+
+      expect(payload.length).to.equal(322); // "0x" + 160*2 hex chars
+
+      // Generate nonce hash
+      const nonceHash = ethers.keccak256(payload);
+
+      // Call via Pelagos
+      await pelagos.processExternalTransaction(APP_CHAIN_ID, nonceHash, payload);
 
       // Check tokens were transferred
       expect(await mockToken.balanceOf(user2.address)).to.equal(amount);
+
+      // Check bridge marked as claimed
+      expect(await bridge.claimedBridges(bridgeId)).to.be.true;
     });
 
-    it("Should mark bridge as claimed", async function () {
-      await bridge.connect(validator).claimAsset(
-        bridgeId,
-        SEPOLIA_CHAIN_ID,
-        await mockToken.getAddress(),
-        amount,
-        user2.address
-      );
+    it("Should revert if not called by Pelagos", async function () {
+      const tokenAddress = await mockToken.getAddress();
+      const tokenPadded = tokenAddress + "000000000000000000000000";
+      const recipientPadded = user2.address + "000000000000000000000000";
 
-      expect(await bridge.isClaimed(bridgeId)).to.be.true;
+      const payload = ethers.concat([
+        bridgeId,
+        ethers.zeroPadValue(ethers.toBeHex(11155111), 32),
+        tokenPadded,
+        ethers.zeroPadValue(ethers.toBeHex(amount), 32),
+        recipientPadded
+      ]);
+
+      await expect(
+        bridge.connect(user1).executeTransaction(payload)
+      ).to.be.revertedWithCustomError(bridge, "Unauthorized");
     });
 
     it("Should revert if already claimed", async function () {
-      await bridge.connect(validator).claimAsset(
+      const tokenAddress = await mockToken.getAddress();
+      const tokenPadded = tokenAddress + "000000000000000000000000";
+      const recipientPadded = user2.address + "000000000000000000000000";
+
+      const payload = ethers.concat([
         bridgeId,
-        SEPOLIA_CHAIN_ID,
-        await mockToken.getAddress(),
-        amount,
-        user2.address
-      );
+        ethers.zeroPadValue(ethers.toBeHex(11155111), 32),
+        tokenPadded,
+        ethers.zeroPadValue(ethers.toBeHex(amount), 32),
+        recipientPadded
+      ]);
 
-      await expect(
-        bridge.connect(validator).claimAsset(
-          bridgeId,
-          SEPOLIA_CHAIN_ID,
-          await mockToken.getAddress(),
-          amount,
-          user2.address
-        )
-      ).to.be.revertedWithCustomError(bridge, "BridgeAlreadyClaimed");
-    });
+      const nonceHash = ethers.keccak256(payload);
+      await pelagos.processExternalTransaction(APP_CHAIN_ID, nonceHash, payload);
 
-    it("Should revert if not called by validator", async function () {
+      // Try again with different nonce - Pelagos wraps Bridge revert with AppchainCallFailed
+      const nonceHash2 = ethers.keccak256(ethers.concat([payload, "0x01"]));
       await expect(
-        bridge.connect(user1).claimAsset(
-          bridgeId,
-          SEPOLIA_CHAIN_ID,
-          await mockToken.getAddress(),
-          amount,
-          user2.address
-        )
-      ).to.be.revertedWithCustomError(bridge, "Unauthorized");
+        pelagos.processExternalTransaction(APP_CHAIN_ID, nonceHash2, payload)
+      ).to.be.revertedWithCustomError(pelagos, "AppchainCallFailed");
     });
 
     it("Should revert if insufficient liquidity", async function () {
@@ -241,77 +315,70 @@ describe("Bridge", function () {
       const newBridgeId = ethers.keccak256(
         ethers.AbiCoder.defaultAbiCoder().encode(
           ["uint256", "uint256", "address", "uint256", "address", "uint256"],
-          [SEPOLIA_CHAIN_ID, 31337, await mockToken.getAddress(), largeAmount, user2.address, Date.now() + 1000]
+          [11155111, 31337, await mockToken.getAddress(), largeAmount, user2.address, Date.now() + 1000]
         )
       );
 
+      const tokenAddress = await mockToken.getAddress();
+      const tokenPadded = tokenAddress + "000000000000000000000000";
+      const recipientPadded = user2.address + "000000000000000000000000";
+
+      const payload = ethers.concat([
+        newBridgeId,
+        ethers.zeroPadValue(ethers.toBeHex(11155111), 32),
+        tokenPadded,
+        ethers.zeroPadValue(ethers.toBeHex(largeAmount), 32),
+        recipientPadded
+      ]);
+
+      // Pelagos wraps Bridge revert with AppchainCallFailed
+      const nonceHash = ethers.keccak256(payload);
       await expect(
-        bridge.connect(validator).claimAsset(
-          newBridgeId,
-          SEPOLIA_CHAIN_ID,
-          await mockToken.getAddress(),
-          largeAmount,
-          user2.address
-        )
-      ).to.be.revertedWithCustomError(bridge, "InsufficientLiquidity");
+        pelagos.processExternalTransaction(APP_CHAIN_ID, nonceHash, payload)
+      ).to.be.revertedWithCustomError(pelagos, "AppchainCallFailed");
     });
   });
 
-  describe("Liquidity Management", function () {
-    it("Should allow anyone to add liquidity", async function () {
-      const amount = ethers.parseUnits("1000", 6);
-      await mockToken.connect(user1).approve(await bridge.getAddress(), amount);
+  describe("Native Token Claims", function () {
+    it("Should execute native token claim via Pelagos", async function () {
+      const amount = ethers.parseEther("1");
 
-      await expect(
-        bridge.connect(user1).addLiquidity(await mockToken.getAddress(), amount)
-      ).to.emit(bridge, "LiquidityAdded")
-        .withArgs(await mockToken.getAddress(), amount, user1.address);
+      // Add native liquidity
+      await owner.sendTransaction({
+        to: await bridge.getAddress(),
+        value: ethers.parseEther("10")
+      });
 
-      expect(await bridge.getLiquidity(await mockToken.getAddress())).to.equal(amount);
-    });
-
-    it("Should allow owner to remove liquidity", async function () {
-      const amount = ethers.parseUnits("1000", 6);
-      await mockToken.mint(await bridge.getAddress(), amount);
-
-      await expect(
-        bridge.connect(owner).removeLiquidity(
-          await mockToken.getAddress(),
-          amount,
-          user1.address
+      const bridgeId = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["uint256", "address", "uint256"],
+          [11155111, user2.address, Date.now()]
         )
-      ).to.emit(bridge, "LiquidityRemoved")
-        .withArgs(await mockToken.getAddress(), amount, user1.address);
-
-      expect(await mockToken.balanceOf(user1.address)).to.equal(
-        ethers.parseUnits("10000", 6) + amount
       );
-    });
 
-    it("Should not allow non-owner to remove liquidity", async function () {
-      const amount = ethers.parseUnits("1000", 6);
-      await mockToken.mint(await bridge.getAddress(), amount);
+      // Zero address for native token (left-aligned)
+      const tokenPadded = ethers.ZeroAddress + "000000000000000000000000";
+      const recipientPadded = user2.address + "000000000000000000000000";
 
-      await expect(
-        bridge.connect(user1).removeLiquidity(
-          await mockToken.getAddress(),
-          amount,
-          user1.address
-        )
-      ).to.be.revertedWithCustomError(bridge, "OwnableUnauthorizedAccount");
+      const payload = ethers.concat([
+        bridgeId,
+        ethers.zeroPadValue(ethers.toBeHex(11155111), 32),
+        tokenPadded,
+        ethers.zeroPadValue(ethers.toBeHex(amount), 32),
+        recipientPadded
+      ]);
+
+      const nonceHash = ethers.keccak256(payload);
+      const balanceBefore = await ethers.provider.getBalance(user2.address);
+
+      await pelagos.processExternalTransaction(APP_CHAIN_ID, nonceHash, payload);
+
+      const balanceAfter = await ethers.provider.getBalance(user2.address);
+      expect(balanceAfter - balanceBefore).to.equal(amount);
     });
   });
 
   describe("Admin Functions", function () {
-    it("Should allow owner to update validator", async function () {
-      await expect(
-        bridge.connect(owner).updateValidator(user1.address)
-      ).to.emit(bridge, "ValidatorUpdated")
-        .withArgs(validator.address, user1.address);
-
-      expect(await bridge.validator()).to.equal(user1.address);
-    });
-
     it("Should allow owner to pause", async function () {
       await bridge.connect(owner).pause();
       expect(await bridge.paused()).to.be.true;
@@ -321,10 +388,11 @@ describe("Bridge", function () {
 
       await expect(
         bridge.connect(user1).bridgeAsset(
+          await mockToken.getAddress(),
+          amount,
           AMOY_CHAIN_ID,
           user2.address,
-          await mockToken.getAddress(),
-          amount
+          "0x"
         )
       ).to.be.revertedWithCustomError(bridge, "EnforcedPause");
     });
@@ -335,33 +403,39 @@ describe("Bridge", function () {
       expect(await bridge.paused()).to.be.false;
     });
 
-    it("Should allow emergency withdrawal when paused", async function () {
+    it("Should allow owner to add liquidity", async function () {
+      const amount = ethers.parseUnits("1000", 6);
+      await mockToken.connect(owner).approve(await bridge.getAddress(), amount);
+      await mockToken.mint(owner.address, amount);
+
+      await bridge.connect(owner).addLiquidity(await mockToken.getAddress(), amount);
+      expect(await bridge.getBalance(await mockToken.getAddress())).to.equal(amount);
+    });
+
+    it("Should allow owner to add native liquidity", async function () {
+      const amount = ethers.parseEther("1");
+      await bridge.connect(owner).addLiquidity(ethers.ZeroAddress, amount, { value: amount });
+      expect(await bridge.getBalance(ethers.ZeroAddress)).to.equal(amount);
+    });
+
+    it("Should allow owner to emergency withdraw", async function () {
       const amount = ethers.parseUnits("1000", 6);
       await mockToken.mint(await bridge.getAddress(), amount);
 
-      await bridge.connect(owner).pause();
-      await bridge.connect(owner).emergencyWithdraw(
-        await mockToken.getAddress(),
-        amount,
-        user1.address
-      );
+      const balanceBefore = await mockToken.balanceOf(owner.address);
+      await bridge.connect(owner).emergencyWithdraw(await mockToken.getAddress(), amount);
+      const balanceAfter = await mockToken.balanceOf(owner.address);
 
-      expect(await mockToken.balanceOf(user1.address)).to.equal(
-        ethers.parseUnits("10000", 6) + amount
-      );
+      expect(balanceAfter - balanceBefore).to.equal(amount);
     });
 
-    it("Should not allow emergency withdrawal when not paused", async function () {
+    it("Should not allow non-owner to emergency withdraw", async function () {
       const amount = ethers.parseUnits("1000", 6);
       await mockToken.mint(await bridge.getAddress(), amount);
 
       await expect(
-        bridge.connect(owner).emergencyWithdraw(
-          await mockToken.getAddress(),
-          amount,
-          user1.address
-        )
-      ).to.be.revertedWithCustomError(bridge, "ExpectedPause");
+        bridge.connect(user1).emergencyWithdraw(await mockToken.getAddress(), amount)
+      ).to.be.revertedWithCustomError(bridge, "OwnableUnauthorizedAccount");
     });
   });
 
@@ -371,10 +445,11 @@ describe("Bridge", function () {
       await mockToken.connect(user1).approve(await bridge.getAddress(), amount);
 
       const tx = await bridge.connect(user1).bridgeAsset(
+        await mockToken.getAddress(),
+        amount,
         AMOY_CHAIN_ID,
         user2.address,
-        await mockToken.getAddress(),
-        amount
+        "0x"
       );
 
       const receipt = await tx.wait();
@@ -393,11 +468,125 @@ describe("Bridge", function () {
       expect(bridgeData.claimed).to.be.false;
     });
 
-    it("Should return correct liquidity", async function () {
+    it("Should return correct balance", async function () {
       const amount = ethers.parseUnits("1000", 6);
       await mockToken.mint(await bridge.getAddress(), amount);
 
-      expect(await bridge.getLiquidity(await mockToken.getAddress())).to.equal(amount);
+      expect(await bridge.getBalance(await mockToken.getAddress())).to.equal(amount);
+    });
+  });
+});
+
+describe("Pelagos", function () {
+  let pelagos;
+  let owner;
+  let user1;
+
+  beforeEach(async function () {
+    [owner, user1] = await ethers.getSigners();
+
+    const Pelagos = await ethers.getContractFactory("Pelagos");
+    pelagos = await Pelagos.deploy();
+    await pelagos.waitForDeployment();
+  });
+
+  describe("Deployment", function () {
+    it("Should set the correct owner", async function () {
+      expect(await pelagos.owner()).to.equal(owner.address);
+    });
+
+    it("Should start with zero processed transactions", async function () {
+      expect(await pelagos.totalProcessedTransactions()).to.equal(0);
+    });
+  });
+
+  describe("Ownership", function () {
+    it("Should allow owner to transfer ownership", async function () {
+      await pelagos.transferOwnership(user1.address);
+      expect(await pelagos.owner()).to.equal(user1.address);
+    });
+
+    it("Should not allow non-owner to transfer ownership", async function () {
+      await expect(
+        pelagos.connect(user1).transferOwnership(user1.address)
+      ).to.be.revertedWithCustomError(pelagos, "CallerNotOwner");
+    });
+
+    it("Should not allow transfer to zero address", async function () {
+      await expect(
+        pelagos.transferOwnership(ethers.ZeroAddress)
+      ).to.be.revertedWithCustomError(pelagos, "InvalidOwner");
+    });
+  });
+
+  describe("Appchain Registration", function () {
+    it("Should register appchain contract", async function () {
+      await pelagos.registerAppchainContract(1604, user1.address);
+      expect(await pelagos.appchainContracts(1604)).to.equal(user1.address);
+    });
+
+    it("Should emit event on registration", async function () {
+      await expect(pelagos.registerAppchainContract(1604, user1.address))
+        .to.emit(pelagos, "AppchainRegistered")
+        .withArgs(1604, user1.address);
+    });
+
+    it("Should unregister appchain contract", async function () {
+      await pelagos.registerAppchainContract(1604, user1.address);
+      await pelagos.unregisterAppchainContract(1604);
+      expect(await pelagos.appchainContracts(1604)).to.equal(ethers.ZeroAddress);
+    });
+
+    it("Should not allow non-owner to register", async function () {
+      await expect(
+        pelagos.connect(user1).registerAppchainContract(1604, user1.address)
+      ).to.be.revertedWithCustomError(pelagos, "CallerNotOwner");
+    });
+  });
+
+  describe("Process External Transaction", function () {
+    it("Should reject empty payload", async function () {
+      const nonceHash = ethers.keccak256(ethers.toUtf8Bytes("test"));
+      await expect(
+        pelagos.processExternalTransaction(1604, nonceHash, "0x")
+      ).to.be.revertedWithCustomError(pelagos, "EmptyPayload");
+    });
+
+    it("Should reject zero appchain ID", async function () {
+      const nonceHash = ethers.keccak256(ethers.toUtf8Bytes("test"));
+      await expect(
+        pelagos.processExternalTransaction(0, nonceHash, "0x1234")
+      ).to.be.revertedWithCustomError(pelagos, "InvalidAppChainId");
+    });
+
+    it("Should reject duplicate nonce hash", async function () {
+      const nonceHash = ethers.keccak256(ethers.toUtf8Bytes("test"));
+
+      // First call succeeds (emits AppchainNotRegistered since no contract registered)
+      await pelagos.processExternalTransaction(1604, nonceHash, "0x1234");
+
+      // Second call with same nonce should fail
+      await expect(
+        pelagos.processExternalTransaction(1604, nonceHash, "0x1234")
+      ).to.be.revertedWithCustomError(pelagos, "TransactionAlreadyProcessed");
+    });
+
+    it("Should emit AppchainNotRegistered when no contract registered", async function () {
+      const nonceHash = ethers.keccak256(ethers.toUtf8Bytes("test"));
+      await expect(pelagos.processExternalTransaction(1604, nonceHash, "0x1234"))
+        .to.emit(pelagos, "AppchainNotRegistered")
+        .withArgs(1604, "0x1234");
+    });
+
+    it("Should increment total processed transactions", async function () {
+      const nonceHash1 = ethers.keccak256(ethers.toUtf8Bytes("test1"));
+      const nonceHash2 = ethers.keccak256(ethers.toUtf8Bytes("test2"));
+
+      await pelagos.processExternalTransaction(1604, nonceHash1, "0x1234");
+      expect(await pelagos.totalProcessedTransactions()).to.equal(1);
+
+      await pelagos.processExternalTransaction(1604, nonceHash2, "0x5678");
+      expect(await pelagos.totalProcessedTransactions()).to.equal(2);
     });
   });
 });

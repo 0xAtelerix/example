@@ -6,8 +6,6 @@ services:
     volumes:
       - ./data:/data
       - ./pelacli.yaml:/config/pelacli.yaml:ro
-    ports:
-      - "8081:8081"
     command:
       - consensus
       - --config=/config/pelacli.yaml
@@ -25,6 +23,7 @@ services:
     ports:
       - "9090:9090"
       - "8080:8080"
+      - "9091:9091"
     depends_on:
       - pelacli
     command:
@@ -39,14 +38,49 @@ services:
     depends_on:
       - appchain
 
-  explorer:
-    image: pelagosnetwork/explorer:latest
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
     ports:
-      - "3001:3000"
-    environment:
-      - RPC_URL=http://localhost:8080/rpc
-      - EXTERNAL_RPC_URL=http://localhost:8081/rpc
+      - "9092:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
     depends_on:
       - appchain
-      - pelacli
 
+  alertmanager:
+    profiles: ["monitoring"]
+    image: prom/alertmanager:latest
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:latest
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

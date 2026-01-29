@@ -14,6 +14,7 @@ import (
 
 	"github.com/0xAtelerix/example/application"
 	"github.com/0xAtelerix/example/application/api"
+	"github.com/0xAtelerix/example/application/metrics"
 )
 
 func main() {
@@ -88,7 +89,7 @@ func Run(ctx context.Context, cfg *application.AppConfig) error {
 	api.NewCustomRPC(rpcServer, appInit.Storage.AppchainDB(), cfg).AddRPCMethods()
 
 	// Error channel for goroutines
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 
 	// Run appchain in background
 	go func() {
@@ -99,6 +100,13 @@ func Run(ctx context.Context, cfg *application.AppConfig) error {
 	go func() {
 		errCh <- rpcServer.StartHTTPServer(ctx, appInit.Config.RPCPort)
 	}()
+
+	// Run metrics server if configured
+	if cfg.MetricsPort > 0 {
+		go func() {
+			errCh <- metrics.StartServer(ctx, cfg.MetricsPort)
+		}()
+	}
 
 	// Wait for shutdown signal or error
 	select {

@@ -33,11 +33,7 @@ module.exports = {
     }
   },
   etherscan: {
-    apiKey: {
-      sepolia: process.env.ETHERSCAN_API_KEY || "",
-      stavanger: process.env.STAVANGER_EXPLORER_API_KEY || "none", // May not have explorer
-      polygonAmoy: process.env.POLYGONSCAN_API_KEY || ""
-    },
+    apiKey: process.env.ETHERSCAN_API_KEY || "",
     customChains: [
       {
         network: "stavanger",
@@ -48,5 +44,8 @@ module.exports = {
         }
       }
     ]
+  },
+  sourcify: {
+    enabled: false
   }
 };

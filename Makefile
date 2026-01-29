@@ -16,14 +16,16 @@ dockerbuild:
 	DOCKER_BUILDKIT=1 docker build --ssh default -t appchain:latest .
 
 up:
-	@echo "🔼 Starting containers..."
 	docker compose up -d
+
+up-monitoring:
+	docker compose --profile monitoring up -d
 
 build:
 	DOCKER_BUILDKIT=1 docker compose build --ssh default
 
 down:
-	docker compose down
+	docker compose --profile monitoring down
 
 logs:
 	docker compose logs

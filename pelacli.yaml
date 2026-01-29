@@ -3,17 +3,24 @@ data_dir: "/data"
 consensus:
   ask_period: 1s
 
-api:
-  port: 8081
-
 appchains:
   - chain_id: 42
     address: "appchain:9090"
 
-read_chains: # Sepolia default available in pelacli for read
+read_chains:
+  - chain_id: 11155111            # Ethereum Sepolia
+    blocks_to_keep: 100
+    prune_interval_seconds: 60
+
+  - chain_id: 80002               # Polygon Amoy testnet (Because Polygon is by default added in Pelacli)
+    blocks_to_keep: 100
+    prune_interval_seconds: 60
+
   - chain_id: 50591822            # Stavanger testnet
     api_key: "wss://stavanger-rpc.eu-north-2.gateway.fm/ws"
     block_offset: 1
+    blocks_to_keep: 100
+    prune_interval_seconds: 60
 
 write_chains:
   - chain_id: 11155111            # Ethereum Sepolia

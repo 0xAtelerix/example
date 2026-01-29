@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/0xAtelerix/sdk/gosdk"
@@ -15,6 +16,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/rs/zerolog/log"
+
+	"github.com/0xAtelerix/example/application/metrics"
 )
 
 const (
@@ -89,6 +92,9 @@ func (p *ExtBlockProcessor) processEVMBlock(
 			externalTxs = append(externalTxs, extTxs...)
 		}
 	}
+
+	// Update last processed block metric
+	metrics.LastProcessedBlock.WithLabelValues(strconv.FormatUint(b.ChainID, 10)).Set(float64(b.BlockNumber))
 
 	log.Info().
 		Uint64("chainID", b.ChainID).
@@ -180,6 +186,13 @@ func (p *ExtBlockProcessor) processReceipt(
 				continue // Don't return ExtTx if store fails
 			}
 
+			// Update metrics
+			srcChain := strconv.FormatUint(bridgeEvent.SourceChain, 10)
+			dstChain := strconv.FormatUint(bridgeEvent.DestChain, 10)
+			metrics.BridgeTransactionsTotal.WithLabelValues(srcChain, dstChain, "confirmed").Inc()
+			metrics.BridgeTransactionsPending.Inc()
+			metrics.TrackPending(bridgeEvent.BridgeID)
+
 			log.Info().
 				Str("bridgeId", bridgeEvent.BridgeID).
 				Uint64("src", bridgeEvent.SourceChain).
@@ -227,6 +240,14 @@ func (p *ExtBlockProcessor) processReceipt(
 
 				continue
 			}
+
+			// Update metrics
+			metrics.BridgeTransactionsPending.Dec()
+			metrics.ResolvePending(bridgeID)
+			metrics.BridgeTransactionsCompleted.Inc()
+			srcChain := strconv.FormatUint(event.SourceChain, 10)
+			dstChain := strconv.FormatUint(event.DestChain, 10)
+			metrics.BridgeTransactionsTotal.WithLabelValues(srcChain, dstChain, "completed").Inc()
 
 			log.Info().Str("bridgeId", bridgeID).Msg("Bridge marked as completed")
 
