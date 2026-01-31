@@ -71,6 +71,7 @@ func Run(ctx context.Context, cfg *gosdk.InitConfig) error {
 		appInit.Config,
 		gosdk.NewDefaultBatchProcessor[application.Transaction[application.Receipt]](
 			application.NewExtBlockProcessor(appInit.Storage.Multichain()),
+			application.NewCEXProcessor(appInit.Storage.CEXData()),
 			appInit.Storage.Multichain(),
 			appInit.Storage.Subscriber(),
 		),
