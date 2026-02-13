@@ -26,3 +26,7 @@ bridge:
     # Stavanger -> Sepolia: native -> POL ERC20
     50591822:
       "0x0000000000000000000000000000000000000000": "0x6a7c3f4b0651d6da389ad1d11d962ea458cdca70"
+
+  retry:
+    interval_seconds: 120  # Retry stuck events every 2 minutes
+    max_attempts: 10      # Maximum retry attempts before giving up

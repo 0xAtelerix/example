@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/0xAtelerix/sdk/gosdk"
 	"github.com/0xAtelerix/sdk/gosdk/apptypes"
@@ -42,6 +43,8 @@ type ExtBlockProcessor struct {
 	bridgeABI       abi.ABI
 	bridgeContracts map[uint64]common.Address                    // chainID -> bridge contract
 	tokenMappings   map[uint64]map[common.Address]common.Address // sourceChain -> token -> destToken
+	retryConfig     RetryConfig
+	lastRetryCheck  time.Time
 }
 
 func NewExtBlockProcessor(
@@ -58,6 +61,7 @@ func NewExtBlockProcessor(
 		bridgeABI:       bridgeABI,
 		bridgeContracts: cfg.Bridge.GetBridgeContracts(),
 		tokenMappings:   cfg.Bridge.GetTokenMappings(),
+		retryConfig:     cfg.Bridge.GetRetryConfig(),
 	}
 }
 
@@ -91,6 +95,13 @@ func (p *ExtBlockProcessor) processEVMBlock(
 		if len(extTxs) > 0 {
 			externalTxs = append(externalTxs, extTxs...)
 		}
+	}
+
+	// Check for stale confirmed events and retry them
+	retryTxs := p.retryStaleEvents(dbtx)
+	if len(retryTxs) > 0 {
+		externalTxs = append(externalTxs, retryTxs...)
+		log.Info().Int("retryCount", len(retryTxs)).Msg("Added retry transactions for stale events")
 	}
 
 	// Update last processed block metric
@@ -241,6 +252,11 @@ func (p *ExtBlockProcessor) processReceipt(
 				continue
 			}
 
+			// Remove from pending bucket (completed events don't need retry)
+			if err := dbtx.Delete(PendingEventsBucket, bridgeKey); err != nil {
+				log.Warn().Err(err).Str("bridgeId", bridgeID).Msg("Failed to remove from pending bucket")
+			}
+
 			// Update metrics
 			metrics.BridgeTransactionsPending.Dec()
 			metrics.ResolvePending(bridgeID)
@@ -388,6 +404,8 @@ func storeBridgeEvent(dbtx kv.RwTx, bridgeEvent *BridgeInitiatedEvent) error {
 		Recipient:    bridgeEvent.Recipient,
 		Status:       BridgeStatusConfirmed,
 		SourceTxHash: bridgeEvent.TxHash,
+		ConfirmedAt:  time.Now().Unix(),
+		RetryCount:   0,
 	}
 
 	eventData, err := json.Marshal(event)
@@ -395,5 +413,169 @@ func storeBridgeEvent(dbtx kv.RwTx, bridgeEvent *BridgeInitiatedEvent) error {
 		return err
 	}
 
-	return dbtx.Put(BridgeEventsBucket, []byte(bridgeEvent.BridgeID), eventData)
+	bridgeKey := []byte(bridgeEvent.BridgeID)
+
+	// Store in main bucket (permanent record)
+	if err := dbtx.Put(BridgeEventsBucket, bridgeKey, eventData); err != nil {
+		return err
+	}
+
+	// Store in pending bucket (for fast retry scans)
+	return dbtx.Put(PendingEventsBucket, bridgeKey, eventData)
+}
+
+// getStaleConfirmedEvents finds confirmed events that have been stuck for longer than retry interval
+// Only scans PendingEventsBucket for efficiency
+func getStaleConfirmedEvents(dbtx kv.RwTx, retryConfig RetryConfig) ([]BridgeEvent, error) {
+	var staleEvents []BridgeEvent
+
+	cursor, err := dbtx.Cursor(PendingEventsBucket)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close()
+
+	retryInterval := time.Duration(retryConfig.IntervalSeconds) * time.Second
+	cutoffTime := time.Now().Add(-retryInterval).Unix()
+
+	k, v, err := cursor.First()
+	if err != nil {
+		return nil, err
+	}
+
+	for ; k != nil; k, v, err = cursor.Next() {
+		if err != nil {
+			return nil, err
+		}
+
+		var event BridgeEvent
+		if err := json.Unmarshal(v, &event); err != nil {
+			log.Warn().Err(err).Str("bridgeId", string(k)).Msg("Failed to unmarshal event during retry scan")
+
+			continue
+		}
+
+		// Check if event is stale and eligible for retry
+		// ConfirmedAt == 0 covers pre-upgrade events that lack a timestamp
+		if (event.ConfirmedAt == 0 || event.ConfirmedAt < cutoffTime) &&
+			event.RetryCount <= retryConfig.MaxAttempts {
+			staleEvents = append(staleEvents, event)
+		}
+	}
+
+	return staleEvents, nil
+}
+
+// retryStaleEvents creates external transactions for stale confirmed events
+func (p *ExtBlockProcessor) retryStaleEvents(dbtx kv.RwTx) []apptypes.ExternalTransaction {
+	// Throttle: only scan once per retry interval to avoid redundant work across chains
+	retryInterval := time.Duration(p.retryConfig.IntervalSeconds) * time.Second
+	if time.Since(p.lastRetryCheck) < retryInterval {
+		return nil
+	}
+
+	p.lastRetryCheck = time.Now()
+
+	staleEvents, err := getStaleConfirmedEvents(dbtx, p.retryConfig)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get stale confirmed events")
+
+		return nil
+	}
+
+	if len(staleEvents) == 0 {
+		return nil
+	}
+
+	var retryTxs []apptypes.ExternalTransaction
+
+	for _, event := range staleEvents {
+		bridgeKey := []byte(event.BridgeID)
+		event.RetryCount++
+		event.ConfirmedAt = time.Now().Unix()
+
+		// Max retries exhausted — mark as failed, don't send another tx
+		if event.RetryCount > p.retryConfig.MaxAttempts {
+			event.Status = BridgeStatusFailed
+
+			eventData, err := json.Marshal(event)
+			if err != nil {
+				log.Error().Err(err).Str("bridgeId", event.BridgeID).Msg("Failed to marshal event for failed update")
+
+				continue
+			}
+
+			if err := dbtx.Put(BridgeEventsBucket, bridgeKey, eventData); err != nil {
+				log.Error().Err(err).Str("bridgeId", event.BridgeID).Msg("Failed to update event as failed")
+
+				continue
+			}
+
+			if err := dbtx.Delete(PendingEventsBucket, bridgeKey); err != nil {
+				log.Warn().Err(err).Str("bridgeId", event.BridgeID).Msg("Failed to remove failed event from pending")
+			}
+
+			metrics.BridgeTransactionsPending.Dec()
+			metrics.ResolvePending(event.BridgeID)
+
+			log.Warn().
+				Str("bridgeId", event.BridgeID).
+				Int("retryCount", event.RetryCount).
+				Msg("Max retries reached, marked as failed")
+
+			continue
+		}
+
+		// Create and send retry transaction
+		extTx, err := p.createMintTransaction(
+			event.DestChain,
+			event.BridgeID,
+			event.SourceChain,
+			event.Token,
+			event.Amount,
+			event.Recipient,
+		)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("bridgeId", event.BridgeID).
+				Int("retryCount", event.RetryCount).
+				Msg("Failed to create retry transaction")
+
+			continue
+		}
+
+		eventData, err := json.Marshal(event)
+		if err != nil {
+			log.Error().Err(err).Str("bridgeId", event.BridgeID).Msg("Failed to marshal event for retry update")
+
+			continue
+		}
+
+		if err := dbtx.Put(BridgeEventsBucket, bridgeKey, eventData); err != nil {
+			log.Error().Err(err).Str("bridgeId", event.BridgeID).Msg("Failed to update event retry count")
+
+			continue
+		}
+
+		if err := dbtx.Put(PendingEventsBucket, bridgeKey, eventData); err != nil {
+			log.Error().Err(err).Str("bridgeId", event.BridgeID).Msg("Failed to update pending event retry count")
+
+			continue
+		}
+
+		log.Info().
+			Str("bridgeId", event.BridgeID).
+			Int("retryCount", event.RetryCount).
+			Uint64("destChain", event.DestChain).
+			Msg("Retrying stale bridge event")
+
+		srcChain := strconv.FormatUint(event.SourceChain, 10)
+		dstChain := strconv.FormatUint(event.DestChain, 10)
+		metrics.BridgeTransactionsTotal.WithLabelValues(srcChain, dstChain, "retry").Inc()
+
+		retryTxs = append(retryTxs, extTx)
+	}
+
+	return retryTxs
 }

@@ -9,12 +9,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// RetryConfig holds configuration for retry behavior.
+type RetryConfig struct {
+	// IntervalSeconds is how long to wait before retrying a stuck event
+	IntervalSeconds int `yaml:"interval_seconds"`
+	// MaxAttempts is the maximum number of retry attempts
+	MaxAttempts int `yaml:"max_attempts"`
+}
+
 // BridgeConfig holds configuration for bridge contracts and token mappings.
 type BridgeConfig struct {
 	// Contracts maps chainID -> bridge contract address
 	Contracts map[uint64]string `yaml:"contracts"`
 	// TokenMappings maps sourceChainID -> sourceToken -> destToken
 	TokenMappings map[uint64]map[string]string `yaml:"token_mappings"`
+	// Retry configuration for stuck events
+	Retry RetryConfig `yaml:"retry"`
 }
 
 // AppConfig embeds the SDK config and adds bridge-specific configuration.
@@ -68,4 +78,20 @@ func (c *BridgeConfig) GetTokenMappings() map[uint64]map[common.Address]common.A
 	}
 
 	return mappings
+}
+
+// GetRetryConfig returns retry configuration with defaults if not set.
+func (c *BridgeConfig) GetRetryConfig() RetryConfig {
+	cfg := c.Retry
+
+	// Apply defaults
+	if cfg.IntervalSeconds <= 0 {
+		cfg.IntervalSeconds = 120 // Default: 2 minutes
+	}
+
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = 10 // Default: 10 attempts
+	}
+
+	return cfg
 }

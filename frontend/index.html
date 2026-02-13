@@ -184,6 +184,36 @@
                     <h2>Transaction History</h2>
                     <button class="btn-clear-history" onclick="clearHistory()">Clear History</button>
                 </div>
+                <div class="status-legend">
+                    <div class="legend-item">
+                        <span class="legend-dot pending"></span>
+                        <div>
+                            <strong>Pending</strong>
+                            <p>Transaction submitted on the source chain, waiting for the bridge to detect it.</p>
+                        </div>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot confirmed"></span>
+                        <div>
+                            <strong>Bridged</strong>
+                            <p>Bridge has confirmed your transaction and is delivering tokens to the destination chain.</p>
+                        </div>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot completed"></span>
+                        <div>
+                            <strong>Claimed</strong>
+                            <p>Tokens have been successfully delivered on the destination chain.</p>
+                        </div>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot failed"></span>
+                        <div>
+                            <strong>Failed</strong>
+                            <p>Delivery failed after multiple retry attempts. Contact support for manual recovery.</p>
+                        </div>
+                    </div>
+                </div>
                 <div class="history-list" id="historyList">
                     <div class="empty-state">
                         <svg width="64" height="64" viewBox="0 0 64 64" fill="none">

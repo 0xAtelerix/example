@@ -3,7 +3,7 @@ module github.com/0xAtelerix/example
 go 1.25.0
 
 require (
-	github.com/0xAtelerix/sdk v0.1.8-0.20260112084622-112a883b375f
+	github.com/0xAtelerix/sdk v0.1.9
 	github.com/ethereum/go-ethereum v1.16.3
 	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/ledgerwatch/log/v3 v3.9.0

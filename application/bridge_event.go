@@ -12,10 +12,13 @@ type BridgeEvent struct {
 	Status       string `json:"status"`                 // Confirmed or Completed
 	SourceTxHash string `json:"sourceTxHash,omitempty"` // Source chain tx hash
 	ClaimTxHash  string `json:"claimTxHash,omitempty"`  // Destination chain tx hash
+	ConfirmedAt  int64  `json:"confirmedAt,omitempty"`  // Unix timestamp when event was confirmed
+	RetryCount   int    `json:"retryCount,omitempty"`   // Number of retry attempts
 }
 
 // BridgeEvent status constants
 const (
 	BridgeStatusConfirmed = "Confirmed" // Event received and external tx generated
 	BridgeStatusCompleted = "Completed" // Claimed on destination chain
+	BridgeStatusFailed    = "Failed"    // Max retries exhausted
 )
