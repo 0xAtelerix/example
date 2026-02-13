@@ -18,3 +18,12 @@ groups:
         annotations:
           summary: "Bridge transaction stuck"
           description: "A bridge transaction has been pending for more than 5 minutes."
+
+      - alert: BlockProcessingStuck
+        expr: changes(bridge_last_processed_block[1m]) == 0 and bridge_last_processed_block > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Block processing stuck"
+          description: "No new blocks processed on chain {{ $labels.chain_id }} for more than 1 minute."

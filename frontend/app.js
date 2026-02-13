@@ -778,7 +778,7 @@ async function loadHistory() {
 
     // Query real status for each transaction
     const updatedHistory = await Promise.all(history.map(async (tx) => {
-        if (tx.bridgeId && tx.status !== 'Completed') {
+        if (tx.bridgeId && tx.status !== 'Completed' && tx.status !== 'Failed') {
             const rpcResult = await queryBridgeStatus(tx.bridgeId);
             if (rpcResult) {
                 tx.status = rpcResult.status;
@@ -794,7 +794,7 @@ async function loadHistory() {
     localStorage.setItem('bridgeHistory', JSON.stringify(updatedHistory));
 
     // Auto-refresh: start interval if there are pending transactions, stop if all completed
-    const hasPending = updatedHistory.some(tx => tx.status !== 'Completed');
+    const hasPending = updatedHistory.some(tx => tx.status !== 'Completed' && tx.status !== 'Failed');
     if (hasPending && !historyRefreshInterval) {
         historyRefreshInterval = setInterval(loadHistory, HISTORY_REFRESH_MS);
     } else if (!hasPending && historyRefreshInterval) {
@@ -805,6 +805,7 @@ async function loadHistory() {
     // Group transactions by status
     const pending = updatedHistory.filter(tx => tx.status === 'Pending');
     const confirmed = updatedHistory.filter(tx => tx.status === 'Confirmed');
+    const failed = updatedHistory.filter(tx => tx.status === 'Failed');
     const completed = updatedHistory.filter(tx => tx.status === 'Completed');
 
     const renderTx = (tx) => {
@@ -862,6 +863,7 @@ async function loadHistory() {
     historyList.innerHTML =
         renderSection('Pending', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>', pending, 'pending') +
         renderSection('Bridged', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>', confirmed, 'confirmed') +
+        renderSection('Failed', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>', failed, 'failed') +
         renderSection('Claimed', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>', completed, 'completed');
 }
 

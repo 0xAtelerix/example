@@ -55,15 +55,13 @@ func Run(ctx context.Context, cfg *application.AppConfig) error {
 	}
 	defer appInit.Close()
 
-	// Subscribe to bridge contracts on external chains
-	application.SubscribeBridgeContracts(appInit.Storage.Subscriber(), cfg)
-
 	// Stage 2: Create appchain with batch processor
 	app := gosdk.NewAppchain(
 		appInit.Storage,
 		appInit.Config,
 		gosdk.NewDefaultBatchProcessor[application.Transaction](
 			application.NewExtBlockProcessor(appInit.Storage.Multichain(), cfg),
+			nil, // no CEX stream processor needed for bridge
 			appInit.Storage.Multichain(),
 			appInit.Storage.Subscriber(),
 		),
