@@ -18,14 +18,17 @@ dockerbuild:
 up:
 	docker compose up -d
 
-up-monitoring:
-	docker compose --profile monitoring up -d
+up-local:
+	docker compose --env-file .env.local up -d
+
+up-prod:
+	docker compose --env-file .env.prod up -d
 
 build:
 	DOCKER_BUILDKIT=1 docker compose build --ssh default
 
 down:
-	docker compose --profile monitoring down
+	docker compose down
 
 logs:
 	docker compose logs

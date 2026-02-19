@@ -4,13 +4,23 @@
     {
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "id": 1,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "noValue": "None",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 120 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        }
       },
-      "targets": [{ "expr": "sum(increase(bridge_transactions_total[24h]))", "refId": "A" }],
-      "title": "Transactions (24h)",
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "(time() - bridge_oldest_pending_timestamp) * (bridge_oldest_pending_timestamp > bool 0)", "refId": "A" }],
+      "title": "Oldest Pending Age",
       "type": "stat"
     },
     {
@@ -65,23 +75,23 @@
     {
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "id": 5,
-      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+      "fieldConfig": { "defaults": { "decimals": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "staircase": true } } },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
-      "targets": [{ "expr": "rate(bridge_transactions_total[5m])", "legendFormat": "{{source_chain}} -> {{dest_chain}}", "refId": "A" }],
-      "title": "Transaction Rate",
+      "targets": [{ "expr": "bridge_transactions_total", "legendFormat": "{{source_chain}} → {{dest_chain}} ({{status}})", "refId": "A" }],
+      "title": "Bridge Transactions",
       "type": "timeseries"
     },
     {
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "id": 6,
-      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2 } } },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
-      "targets": [{ "expr": "bridge_last_processed_block", "legendFormat": "Chain {{chain_id}}", "refId": "A" }],
-      "title": "Last Processed Block",
+      "targets": [{ "expr": "delta(bridge_last_processed_block[1m])", "legendFormat": "Chain {{chain_id}}", "refId": "A" }],
+      "title": "Blocks Processed (per min)",
       "type": "timeseries"
     }
   ],
-  "refresh": "10s",
+  "refresh": "5s",
   "schemaVersion": 38,
   "tags": ["bridge"],
   "time": { "from": "now-1h", "to": "now" },

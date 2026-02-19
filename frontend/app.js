@@ -4,17 +4,7 @@ let balanceRefreshInterval = null;
 const HISTORY_REFRESH_MS = 2000; // 2 seconds
 const BALANCE_REFRESH_MS = 5000; // 5 seconds
 
-// Configuration - DEPLOYED AND READY!
-const CONFIG = {
-    BRIDGE_SEPOLIA: '0x844E740Ea7F404c6208fd85Ee6114a14F8037df7', // Sepolia bridge address
-    BRIDGE_STAVANGER: '0x3C1c8351a09DB0300786148B56EcB7be2FaA322e', // Stavanger bridge address
-    POL_TOKEN_SEPOLIA: '0x6a7c3f4b0651d6da389ad1d11d962ea458cdca70',
-    SEPOLIA_CHAIN_ID: 11155111,
-    STAVANGER_CHAIN_ID: 50591822,
-    SEPOLIA_RPC: 'https://eth-sepolia.g.alchemy.com/v2/bEzb7Rb14hzR79tLw-gfy',
-    STAVANGER_RPC: 'https://rpc.stavanger.gateway.fm',
-    APPCHAIN_RPC: 'http://localhost:8080/rpc', // Pelagos bridge appchain RPC
-};
+// CONFIG is loaded from config.js (generated from .env at container startup)
 
 // Network metadata
 const NETWORKS = {

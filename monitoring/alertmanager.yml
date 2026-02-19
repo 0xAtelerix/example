@@ -2,7 +2,7 @@ global:
   resolve_timeout: 5m
 
 route:
-  group_by: ['alertname', 'severity']
+  group_by: ['alertname', 'severity', 'chain_id']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
@@ -24,8 +24,8 @@ route:
 receivers:
   - name: 'telegram'
     telegram_configs:
-      - bot_token: '${TELEGRAM_BOT_TOKEN}'
-        chat_id: ${TELEGRAM_CHAT_ID}
+      - bot_token: 'PLACEHOLDER_TELEGRAM_BOT_TOKEN'
+        chat_id: PLACEHOLDER_TELEGRAM_CHAT_ID
         parse_mode: 'HTML'
         message: |
           {{ if eq .Status "firing" }}🚨{{ else }}✅{{ end }} <b>{{ .Status | toUpper }}</b>

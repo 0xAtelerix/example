@@ -1,7 +1,10 @@
 .idea
 .vscode
+.DS_Store
 main
+bin/
 data/
-config.yaml
-pelacli.yaml
+.env.local
+.env.prod
+frontend/config.js
 CLAUDE.md

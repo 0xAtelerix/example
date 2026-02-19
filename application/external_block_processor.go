@@ -261,10 +261,6 @@ func (p *ExtBlockProcessor) processReceipt(
 			metrics.BridgeTransactionsPending.Dec()
 			metrics.ResolvePending(bridgeID)
 			metrics.BridgeTransactionsCompleted.Inc()
-			srcChain := strconv.FormatUint(event.SourceChain, 10)
-			dstChain := strconv.FormatUint(event.DestChain, 10)
-			metrics.BridgeTransactionsTotal.WithLabelValues(srcChain, dstChain, "completed").Inc()
-
 			log.Info().Str("bridgeId", bridgeID).Msg("Bridge marked as completed")
 
 		default:
